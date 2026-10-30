@@ -7,3 +7,8 @@ declare global {
     electronAPI: DesktopAgentAPI
   }
 }
+
+declare module '*.png' {
+  const src: string
+  export default src
+}

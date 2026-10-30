@@ -1,24 +1,39 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 
 let mainWindow: BrowserWindow | null = null
 
 function createWindow(): void {
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const { width, height, x, y } = primaryDisplay.workArea
+
   mainWindow = new BrowserWindow({
-    width: 980,
-    height: 700,
-    minWidth: 720,
-    minHeight: 520,
+    x,
+    y,
+    width,
+    height,
     show: false,
-    autoHideMenuBar: true,
-    title: 'Desktop Agent',
+    transparent: true,
+    frame: false,
+    hasShadow: false,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true
     }
   })
+
+  // Keep window always visible above full screen and desktop apps
+  mainWindow.setAlwaysOnTop(true, 'screen-saver')
+  mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+
+  // By default, ignore mouse events on transparent background and forward clicks
+  mainWindow.setIgnoreMouseEvents(true, { forward: true })
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
@@ -29,7 +44,7 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // Load renderer URL in dev or bundled file in production
+  // Load renderer
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
@@ -38,18 +53,22 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  // IPC handlers
-  ipcMain.handle('app:get-info', () => {
-    return {
-      name: app.getName(),
-      version: app.getVersion(),
-      electronVersion: process.versions.electron,
-      nodeVersion: process.versions.node,
-      platform: process.platform
-    }
+  // IPC Handlers
+  ipcMain.handle('ping', () => 'pong')
+
+  ipcMain.handle('app:get-screen-size', () => {
+    const primaryDisplay = screen.getPrimaryDisplay()
+    return primaryDisplay.workAreaSize
   })
 
-  ipcMain.handle('ping', () => 'pong')
+  ipcMain.on('window:set-ignore-mouse-events', (_event, ignore: boolean, options?: { forward: boolean }) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.setIgnoreMouseEvents(ignore, options)
+  })
+
+  ipcMain.on('app:quit', () => {
+    app.quit()
+  })
 
   createWindow()
 

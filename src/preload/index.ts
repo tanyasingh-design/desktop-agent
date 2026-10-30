@@ -1,14 +1,19 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AppInfo } from '../renderer/types'
 
 export interface DesktopAgentAPI {
   ping: () => Promise<string>
-  getAppInfo: () => Promise<AppInfo>
+  getScreenSize: () => Promise<{ width: number; height: number }>
+  setIgnoreMouseEvents: (ignore: boolean, options?: { forward: boolean }) => void
+  quitApp: () => void
 }
 
 const api: DesktopAgentAPI = {
   ping: () => ipcRenderer.invoke('ping'),
-  getAppInfo: () => ipcRenderer.invoke('app:get-info')
+  getScreenSize: () => ipcRenderer.invoke('app:get-screen-size'),
+  setIgnoreMouseEvents: (ignore: boolean, options?: { forward: boolean }) => {
+    ipcRenderer.send('window:set-ignore-mouse-events', ignore, options)
+  },
+  quitApp: () => ipcRenderer.send('app:quit')
 }
 
 contextBridge.exposeInMainWorld('electronAPI', api)
