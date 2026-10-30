@@ -1,14 +1,9 @@
 /// <reference types="vite/client" />
 
-import type { AshAPI } from '../preload/index'
+import type { DesktopAgentAPI } from '../preload/index'
 
 declare global {
   interface Window {
-    ashAPI: AshAPI
+    electronAPI: DesktopAgentAPI
   }
-}
-
-declare module '*.png' {
-  const value: string
-  export default value
 }
