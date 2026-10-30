@@ -1,4 +1,4 @@
-export type SpriteState = 'idle' | 'fly' | 'sleep' | 'remind' | 'snack'
+export type SpriteState = 'idle' | 'walk' | 'fly' | 'sleep' | 'remind' | 'snack'
 
 export interface Task {
   id: string

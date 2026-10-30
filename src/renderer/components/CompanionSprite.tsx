@@ -5,9 +5,10 @@ import { PIXEL_SPRITES } from '../lib/pixel-data'
 interface CompanionSpriteProps {
   state: SpriteState
   scale?: number // target visual display width in px (e.g. 130)
+  facing?: 'left' | 'right'
 }
 
-export const CompanionSprite: React.FC<CompanionSpriteProps> = ({ state, scale = 130 }) => {
+export const CompanionSprite: React.FC<CompanionSpriteProps> = ({ state, scale = 130, facing = 'right' }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const animFrameRef = useRef<number | null>(null)
   const startTimeRef = useRef<number>(Date.now())
@@ -22,7 +23,7 @@ export const CompanionSprite: React.FC<CompanionSpriteProps> = ({ state, scale =
     ctx.imageSmoothingEnabled = false
 
     const sprite = PIXEL_SPRITES[state] || PIXEL_SPRITES['idle']
-    const pixelScale = 2 // Native grid scaling
+    const pixelScale = 2
     const canvasW = sprite.width * pixelScale
     const canvasH = sprite.height * pixelScale
 
@@ -38,7 +39,7 @@ export const CompanionSprite: React.FC<CompanionSpriteProps> = ({ state, scale =
 
       ctx.clearRect(0, 0, canvasW, canvasH)
 
-      // Eye blink logic (idle/remind/snack states only)
+      // Eye blink logic (idle/walk/remind/snack states)
       if (state !== 'sleep') {
         if (now > nextBlinkTime) {
           isBlinking = true
@@ -49,36 +50,57 @@ export const CompanionSprite: React.FC<CompanionSpriteProps> = ({ state, scale =
         }
       }
 
-      // 1. Draw all character pixels from code
+      // Vertical offset:
+      // ZERO offset for idle/sleep/remind/snack (firmly planted on the ground, NO floating!)
+      // Flight has gentle bobbing
+      const verticalOffset = state === 'fly' ? Math.sin(elapsed * 0.005) * 2 : 0
+
+      // Dynamic Wing Flap in code for flight
+      const isFlying = state === 'fly'
+      const flapAngle = isFlying ? Math.sin(elapsed * 0.024) : 0
+
+      // 1. Draw character pixels from code
       const pixels = sprite.pixels
       const len = pixels.length
-
-      // Dynamic vertical breathing bounce in code
-      const breathOffset = state === 'idle' || state === 'sleep'
-        ? Math.sin(elapsed * 0.003) * 1.5
-        : state === 'fly'
-        ? Math.sin(elapsed * 0.008) * 3
-        : 0
 
       for (let i = 0; i < len; i++) {
         const [px, py, hex] = pixels[i]
 
+        let drawY = py
+        let drawX = px
+
+        // Animate wings flapping up and down in fly state
+        if (isFlying && py >= 16 && py <= 58) {
+          // Left wing
+          if (px < 23) {
+            const distFromRoot = 23 - px
+            const flapShift = Math.round(flapAngle * distFromRoot * 0.38)
+            drawY = py + flapShift
+          }
+          // Right wing
+          else if (px > 41) {
+            const distFromRoot = px - 41
+            const flapShift = Math.round(flapAngle * distFromRoot * 0.38)
+            drawY = py + flapShift
+          }
+        }
+
         // If blinking and near eye height/x in face area, close eyelid
-        if (isBlinking && hex === '#5ce1e6') {
+        if (isBlinking && (hex === '#5ce1e6' || hex === '#38bdf8')) {
           ctx.fillStyle = '#2b3345'
         } else {
           ctx.fillStyle = hex
         }
 
         ctx.fillRect(
-          px * pixelScale,
-          Math.round(py * pixelScale + breathOffset),
+          drawX * pixelScale,
+          Math.round(drawY * pixelScale + verticalOffset),
           pixelScale,
           pixelScale
         )
       }
 
-      // 2. Procedural Floating Cyan Spirit Flame Wisps (in code)
+      // 2. Procedural Floating Cyan Spirit Flame Wisps
       const wispPositions = [
         { baseX: 8, baseY: 14, speed: 0.004, phase: 0 },
         { baseX: 54, baseY: 12, speed: 0.0035, phase: 1.5 },
@@ -87,10 +109,10 @@ export const CompanionSprite: React.FC<CompanionSpriteProps> = ({ state, scale =
       ]
 
       for (const wisp of wispPositions) {
-        const floatY = Math.sin(elapsed * wisp.speed + wisp.phase) * 6
+        const floatY = Math.sin(elapsed * wisp.speed + wisp.phase) * 5
         const floatX = Math.cos(elapsed * (wisp.speed * 0.8) + wisp.phase) * 2
         const wx = Math.round((wisp.baseX + floatX) * pixelScale)
-        const wy = Math.round((wisp.baseY + floatY + breathOffset) * pixelScale)
+        const wy = Math.round((wisp.baseY + floatY + verticalOffset) * pixelScale)
 
         // Draw pixelated flame core
         ctx.fillStyle = '#5ce1e6'
@@ -107,14 +129,13 @@ export const CompanionSprite: React.FC<CompanionSpriteProps> = ({ state, scale =
         ctx.fillRect(wx, wy - pixelScale, pixelScale * 2, pixelScale)
       }
 
-      // 3. Floating ZZZ particles during sleep (drawn in code)
+      // 3. Floating ZZZ particles during sleep
       if (state === 'sleep') {
         const zProgress = (elapsed % 3000) / 3000
         const zX = Math.round((46 + zProgress * 8) * pixelScale)
         const zY = Math.round((16 - zProgress * 14) * pixelScale)
 
         ctx.fillStyle = `rgba(92, 225, 230, ${1 - zProgress * 0.8})`
-        // Draw pixelated "Z"
         const p = pixelScale
         ctx.fillRect(zX, zY, p * 3, p)
         ctx.fillRect(zX + p * 2, zY + p, p, p)
@@ -135,7 +156,13 @@ export const CompanionSprite: React.FC<CompanionSpriteProps> = ({ state, scale =
   }, [state])
 
   return (
-    <div style={{ position: 'relative', display: 'inline-block' }}>
+    <div
+      className={`anim-${state} facing-${facing}`}
+      style={{
+        position: 'relative',
+        display: 'inline-block'
+      }}
+    >
       <canvas
         ref={canvasRef}
         style={{

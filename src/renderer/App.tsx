@@ -8,7 +8,7 @@ import { sounds } from './lib/sound'
 const DEFAULT_SETTINGS: CompanionSettings = {
   soundEnabled: true,
   roamingEnabled: true,
-  roamIntervalSeconds: 45,
+  roamIntervalSeconds: 35,
   typingAvoidance: 'high',
   bubbleFrequencyMinutes: 30,
   petScale: 130,
@@ -42,12 +42,18 @@ export default function App(): JSX.Element {
   // Screen bounds
   const [screenSize, setScreenSize] = useState({ width: window.innerWidth, height: window.innerHeight })
 
+  // Desktop Floor Y position (firmly grounded, zero floating)
+  const floorY = Math.max(40, screenSize.height - 240)
+
   // Position & Movement
   const [position, setPosition] = useState<{ x: number; y: number }>(() => ({
-    x: Math.max(40, window.innerWidth - 200),
+    x: Math.max(40, window.innerWidth - 220),
     y: Math.max(40, window.innerHeight - 240)
   }))
+  const [facing, setFacing] = useState<'left' | 'right'>('left')
+  const [isWalking, setIsWalking] = useState(false)
   const [isFlying, setIsFlying] = useState(false)
+  const [walkDuration, setWalkDuration] = useState(3)
   const [spriteState, setSpriteState] = useState<SpriteState>('idle')
 
   // Dragging
@@ -59,9 +65,10 @@ export default function App(): JSX.Element {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [bubbleMessage, setBubbleMessage] = useState<BubbleMessage | null>(null)
 
-  // State Overrides (temporary animation timer)
-  const stateTimerRef = useRef<NodeJS.Timeout | null>(null)
+  // Timers
+  const movementTimerRef = useRef<NodeJS.Timeout | null>(null)
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const stateTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Data
   const [tasks, setTasks] = useState<Task[]>(() => {
@@ -111,9 +118,10 @@ export default function App(): JSX.Element {
       window.electronAPI.getScreenSize().then((size) => {
         if (size.width && size.height) {
           setScreenSize(size)
+          const groundY = Math.max(40, size.height - 240)
           setPosition({
-            x: Math.max(40, size.width - 200),
-            y: Math.max(40, size.height - 240)
+            x: Math.max(40, size.width - 220),
+            y: groundY
           })
         }
       })
@@ -127,7 +135,6 @@ export default function App(): JSX.Element {
     }
   }, [])
 
-  // When modal state changes, toggle mouse events
   useEffect(() => {
     if (isModalOpen) {
       setIgnoreMouse(false)
@@ -153,7 +160,7 @@ export default function App(): JSX.Element {
     }
   }, [resetIdleTimer])
 
-  // Trigger temporary state (e.g. snack or remind)
+  // Trigger temporary state
   const triggerState = (state: SpriteState, durationMs: number = 4000) => {
     if (stateTimerRef.current) clearTimeout(stateTimerRef.current)
     setSpriteState(state)
@@ -163,34 +170,74 @@ export default function App(): JSX.Element {
     }, durationMs)
   }
 
-  // Smooth fly to target coordinates
-  const flyTo = useCallback((targetX: number, targetY: number) => {
-    setIsFlying(true)
-    setSpriteState('fly')
+  // ── Walking Animation Across the Floor ───────────────────
+  const walkTo = useCallback((targetX: number) => {
+    if (isDraggingRef.current) return
+    const clampedX = Math.max(40, Math.min(screenSize.width - 180, targetX))
+    const dist = Math.abs(clampedX - position.x)
+    if (dist < 15) return // Already there
 
-    // Clamp inside screen bounds
+    // Calculate natural walking duration (approx 80px/sec)
+    const duration = Math.max(1.4, Math.min(4.5, dist / 85))
+    setWalkDuration(duration)
+
+    // Face the direction of walking
+    setFacing(clampedX > position.x ? 'right' : 'left')
+    setIsWalking(true)
+    setIsFlying(false)
+    setSpriteState('walk')
+
+    // Move to target X, keeping firmly on the floor Y
+    setPosition((prev) => ({ x: clampedX, y: floorY }))
+
+    if (movementTimerRef.current) clearTimeout(movementTimerRef.current)
+    movementTimerRef.current = setTimeout(() => {
+      setIsWalking(false)
+      setSpriteState('idle')
+      resetIdleTimer()
+    }, duration * 1000)
+  }, [position.x, screenSize.width, floorY, resetIdleTimer])
+
+  // ── Flying Animation with Flapping Wings ─────────────────
+  const flyTo = useCallback((targetX: number, targetY: number, landOnFloor: boolean = true) => {
+    if (isDraggingRef.current) return
     const clampedX = Math.max(40, Math.min(screenSize.width - 180, targetX))
     const clampedY = Math.max(40, Math.min(screenSize.height - 200, targetY))
 
+    setFacing(clampedX > position.x ? 'right' : 'left')
+    setIsFlying(true)
+    setIsWalking(false)
+    setSpriteState('fly')
+
+    // Soar to target position
     setPosition({ x: clampedX, y: clampedY })
 
-    // Land after glide animation
-    setTimeout(() => {
-      setIsFlying(false)
-      setSpriteState('idle')
-      resetIdleTimer()
-    }, 1500)
-  }, [screenSize, resetIdleTimer])
+    if (movementTimerRef.current) clearTimeout(movementTimerRef.current)
+    movementTimerRef.current = setTimeout(() => {
+      if (landOnFloor && clampedY < floorY) {
+        // Softly land back on the desktop floor
+        setPosition({ x: clampedX, y: floorY })
+        setTimeout(() => {
+          setIsFlying(false)
+          setSpriteState('idle')
+          resetIdleTimer()
+        }, 600)
+      } else {
+        setIsFlying(false)
+        setSpriteState('idle')
+        resetIdleTimer()
+      }
+    }, 1600)
+  }, [position.x, screenSize, floorY, resetIdleTimer])
 
-  // Fly to safe desktop corner (Anti-Typing Evacuation)
+  // ── Anti-Typing Evacuation (Takes flight to safe corner) ─
   const flyToSafeCorner = useCallback(() => {
-    // Pick between bottom-right or bottom-left corner
     const corners = [
-      { x: screenSize.width - 200, y: screenSize.height - 240 },
-      { x: 50, y: screenSize.height - 240 },
-      { x: screenSize.width - 200, y: 60 }
+      { x: screenSize.width - 220, y: floorY },
+      { x: 50, y: floorY },
+      { x: screenSize.width - 220, y: 80 },
+      { x: 50, y: 80 }
     ]
-    // Pick the furthest corner from current position
     let bestCorner = corners[0]
     let maxDist = 0
     for (const c of corners) {
@@ -201,40 +248,36 @@ export default function App(): JSX.Element {
       }
     }
     sounds.playPop()
-    flyTo(bestCorner.x, bestCorner.y)
-  }, [screenSize, position, flyTo])
+    flyTo(bestCorner.x, bestCorner.y, true)
+  }, [screenSize.width, floorY, position, flyTo])
 
-  // Autonomous Roaming
+  // ── Autonomous Movement Loop (Walks 75% of the time, Flies 25%) ──
   useEffect(() => {
     if (!settings.roamingEnabled || isModalOpen) return
 
     const interval = setInterval(() => {
-      if (isDraggingRef.current || isFlying) return
+      if (isDraggingRef.current || isWalking || isFlying) return
 
-      // Pick a random perimeter or floor location (avoiding typing middle zone)
-      const isFloor = Math.random() > 0.35
-      let targetX = 0
-      let targetY = 0
+      // 75% chance: Walk along the floor to a new spot
+      // 25% chance: Playful flight soaring into the air and landing
+      const shouldFly = Math.random() > 0.75
 
-      if (isFloor) {
-        // Sit on desktop floor/taskbar edge
-        targetX = Math.floor(Math.random() * (screenSize.width - 240)) + 60
-        targetY = screenSize.height - 240
+      if (shouldFly) {
+        // Soar up in an arc, then land
+        const targetX = Math.floor(Math.random() * (screenSize.width - 260)) + 60
+        const aerialY = Math.floor(Math.random() * (screenSize.height * 0.45)) + 60
+        flyTo(targetX, aerialY, true)
       } else {
-        // Roam to left or right margin
-        const onRight = Math.random() > 0.5
-        targetX = onRight ? screenSize.width - 200 : 50
-        targetY = Math.floor(Math.random() * (screenSize.height - 300)) + 60
+        // Walk along the floor!
+        const targetX = Math.floor(Math.random() * (screenSize.width - 260)) + 60
+        walkTo(targetX)
       }
-
-      flyTo(targetX, targetY)
     }, settings.roamIntervalSeconds * 1000)
 
     return () => clearInterval(interval)
-  }, [settings.roamingEnabled, settings.roamIntervalSeconds, isModalOpen, isFlying, screenSize, flyTo])
+  }, [settings.roamingEnabled, settings.roamIntervalSeconds, isModalOpen, isWalking, isFlying, screenSize, walkTo, flyTo])
 
-  // Anti-Typing Avoidance Listener:
-  // If user starts typing and companion is in typing center zone, companion takes flight!
+  // ── Anti-Typing Avoidance Listener ───────────────────────
   useEffect(() => {
     if (settings.typingAvoidance === 'off') return
 
@@ -247,7 +290,7 @@ export default function App(): JSX.Element {
         return
       }
 
-      // Check if pet is currently in the active typing zone (center 60% of screen)
+      // Check if companion is in central typing zone
       const centerMinX = screenSize.width * 0.2
       const centerMaxX = screenSize.width * 0.8
       const centerMinY = screenSize.height * 0.2
@@ -268,9 +311,8 @@ export default function App(): JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [settings.typingAvoidance, isModalOpen, position, screenSize, isFlying, flyToSafeCorner])
 
-  // Periodic Reminder Bubbles (every 15-30 mins or on startup)
+  // Periodic Reminder Bubbles
   useEffect(() => {
-    // Initial welcome reminder after 3 seconds
     const welcomeTimer = setTimeout(() => {
       const pending = tasks.filter((t) => !t.completed)
       if (pending.length > 0) {
@@ -290,17 +332,19 @@ export default function App(): JSX.Element {
 
   // Dragging Handlers
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return // Left click only
+    if (e.button !== 0) return
     isDraggingRef.current = true
     hasMovedSignificantlyRef.current = false
+    setIsWalking(false)
+    setIsFlying(true)
+    setSpriteState('fly')
+
     dragStartRef.current = {
       mouseX: e.clientX,
       mouseY: e.clientY,
       posX: position.x,
       posY: position.y
     }
-
-    setSpriteState('fly')
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       if (!isDraggingRef.current) return
@@ -311,10 +355,11 @@ export default function App(): JSX.Element {
         hasMovedSignificantlyRef.current = true
       }
 
-      setPosition({
-        x: Math.max(10, Math.min(screenSize.width - 150, dragStartRef.current.posX + dx)),
-        y: Math.max(10, Math.min(screenSize.height - 180, dragStartRef.current.posY + dy))
-      })
+      const nextX = Math.max(10, Math.min(screenSize.width - 150, dragStartRef.current.posX + dx))
+      const nextY = Math.max(10, Math.min(screenSize.height - 180, dragStartRef.current.posY + dy))
+
+      setFacing(nextX > position.x ? 'right' : 'left')
+      setPosition({ x: nextX, y: nextY })
     }
 
     const handleMouseUp = () => {
@@ -322,10 +367,10 @@ export default function App(): JSX.Element {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
 
+      setIsFlying(false)
       setSpriteState('idle')
       resetIdleTimer()
 
-      // If user merely clicked without moving, open modal
       if (!hasMovedSignificantlyRef.current) {
         sounds.playClick()
         setIsModalOpen(true)
@@ -362,12 +407,13 @@ export default function App(): JSX.Element {
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
-      {/* Draggable Desktop Companion Agent */}
+      {/* Draggable & Walking/Flying Desktop Companion */}
       <div
-        className={`companion-wrapper ${isFlying ? 'flying' : ''}`}
+        className={`companion-wrapper ${isWalking ? 'walking' : ''} ${isFlying ? 'flying' : ''}`}
         style={{
           left: `${position.x}px`,
-          top: `${position.y}px`
+          top: `${position.y}px`,
+          ['--walk-duration' as string]: `${walkDuration}s`
         }}
         onMouseEnter={() => setIgnoreMouse(false)}
         onMouseLeave={() => {
@@ -387,8 +433,12 @@ export default function App(): JSX.Element {
           }}
         />
 
-        {/* Character Sprite */}
-        <CompanionSprite state={spriteState} scale={settings.petScale} />
+        {/* Character Sprite Canvas */}
+        <CompanionSprite
+          state={spriteState}
+          scale={settings.petScale}
+          facing={facing}
+        />
       </div>
 
       {/* Retro Pixel Modal / Dialog Box */}

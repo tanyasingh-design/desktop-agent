@@ -58,15 +58,18 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   align-items: center;
-  transition: transform 0.15s ease-out;
 }
 
 .companion-wrapper:active {
   cursor: grabbing;
 }
 
+.companion-wrapper.walking {
+  transition: left var(--walk-duration, 3s) linear, top 0.2s ease-out;
+}
+
 .companion-wrapper.flying {
-  transition: left 1.4s cubic-bezier(0.25, 1, 0.5, 1), top 1.4s cubic-bezier(0.25, 1, 0.5, 1);
+  transition: left 1.6s cubic-bezier(0.25, 1, 0.5, 1), top 1.6s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .companion-sprite {
@@ -84,55 +87,57 @@ html, body, #root {
   transform: scale(1.04);
 }
 
-/* Bobbing & Breathing Animations */
-@keyframes companion-bob {
+/* Idle is grounded with zero floating */
+.anim-idle {
+  transform: none;
+}
+
+.anim-sleep {
+  transform: none;
+}
+
+.anim-remind {
+  transform: none;
+}
+
+.anim-snack {
+  transform: none;
+}
+
+/* Walking stride animation */
+@keyframes companion-walk-step {
   0%, 100% {
     transform: translateY(0);
   }
   50% {
-    transform: translateY(-5px);
+    transform: translateY(-4px);
   }
 }
 
+.anim-walk {
+  animation: companion-walk-step 0.35s ease-in-out infinite;
+}
+
+/* Flying Flight Momentum */
 @keyframes companion-fly {
   0%, 100% {
     transform: translateY(0) rotate(0deg);
   }
-  25% {
-    transform: translateY(-8px) rotate(-2deg);
-  }
-  75% {
-    transform: translateY(4px) rotate(2deg);
-  }
-}
-
-@keyframes companion-sleep {
-  0%, 100% {
-    transform: scale(1);
-  }
   50% {
-    transform: scale(0.98) translateY(2px);
+    transform: translateY(-8px) rotate(-1deg);
   }
-}
-
-.anim-idle {
-  animation: companion-bob 3s ease-in-out infinite;
 }
 
 .anim-fly {
-  animation: companion-fly 1.8s ease-in-out infinite;
+  animation: companion-fly 1.2s ease-in-out infinite;
 }
 
-.anim-sleep {
-  animation: companion-sleep 4s ease-in-out infinite;
+/* Horizontal Direction Flip */
+.facing-left canvas {
+  transform: scaleX(-1);
 }
-
-.anim-remind {
-  animation: companion-bob 2.2s ease-in-out infinite;
-}
-
-.anim-snack {
-  animation: companion-bob 1.5s ease-in-out infinite;
+.facing-right canvas {
+  transform: scaleX(1);
 }
 
 /* Sleep ZZZ particles */
