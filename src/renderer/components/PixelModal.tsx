@@ -55,7 +55,7 @@ export const PixelModal: React.FC<PixelModalProps> = ({
       sounds.playAlert()
       if (pomoMode === 'focus') {
         setPomoCycles((c) => c + 1)
-        onTriggerState('snack', 8000)
+        onTriggerState('remind', 8000)
         setPomoMode('shortBreak')
         setPomoTimeLeft(settings.pomodoro.shortBreakMinutes * 60)
       } else {
@@ -213,7 +213,7 @@ export const PixelModal: React.FC<PixelModalProps> = ({
                           onClick={() => {
                             if (!task.completed) {
                               sounds.playSuccess()
-                              onTriggerState('snack', 4000)
+                              onTriggerState('remind', 5000)
                             } else {
                               sounds.playClick()
                             }
@@ -347,7 +347,7 @@ export const PixelModal: React.FC<PixelModalProps> = ({
                     onClick={() => {
                       if (!dailyGoal.completed) {
                         sounds.playSuccess()
-                        onTriggerState('snack', 6000)
+                        onTriggerState('remind', 6000)
                       }
                       onUpdateDailyGoal({ completed: !dailyGoal.completed })
                     }}
@@ -457,6 +457,28 @@ export const PixelModal: React.FC<PixelModalProps> = ({
                 >
                   {settings.soundEnabled ? 'ON' : 'MUTED'}
                 </button>
+              </div>
+
+              <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                <div>
+                  <div className="settings-label">Companion Mood / State Preview</div>
+                  <div className="settings-desc">Instantly test all 7 pixelated states</div>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', width: '100%' }}>
+                  {(['idle', 'walk', 'fly', 'angry', 'sad', 'remind', 'sleep'] as SpriteState[]).map((st) => (
+                    <button
+                      key={st}
+                      className="pixel-btn secondary"
+                      style={{ fontSize: '9px', padding: '5px 8px', textTransform: 'uppercase' }}
+                      onClick={() => {
+                        sounds.playPop()
+                        onTriggerState(st, 8000)
+                      }}
+                    >
+                      {st}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="settings-row">
