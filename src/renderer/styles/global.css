@@ -111,14 +111,23 @@ body,
 /* ── Pixel Speech Bubble ─────────────────────── */
 .speech-bubble-bridge {
   position: absolute;
-  bottom: 100%;
+  bottom: calc(100% - 32px);
   left: 50%;
   transform: translateX(-50%);
-  padding-bottom: 14px;
+  padding-bottom: 4px;
   pointer-events: auto !important;
   z-index: 1050;
   background: rgba(0, 0, 0, 0.01);
   cursor: pointer;
+  transition: bottom 0.25s ease;
+}
+
+.speech-bubble-bridge.bubble-sleep {
+  bottom: calc(100% - 54px);
+}
+
+.speech-bubble-bridge.bubble-fly {
+  bottom: calc(100% - 14px);
 }
 
 .speech-bubble {

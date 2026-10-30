@@ -934,6 +934,7 @@ export default function App(): JSX.Element {
         {/* Speech Bubble with Typewriter animation & 1-minute auto-hide */}
         <SpeechBubble
           message={stickyBubbleMessage}
+          spriteState={spriteState}
           onMouseEnter={enterInteractiveZone}
           onClose={() => setIsBubbleVisible(false)}
           onAction={openQuestModal}

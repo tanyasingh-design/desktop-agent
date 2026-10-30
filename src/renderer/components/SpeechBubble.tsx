@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react'
-import type { BubbleMessage } from '../types'
+import type { BubbleMessage, SpriteState } from '../types'
 
 interface SpeechBubbleProps {
   message: BubbleMessage | null
+  spriteState?: SpriteState
   onClose?: () => void
   onAction?: (actionData?: string) => void
   onMouseEnter?: () => void
@@ -11,6 +12,7 @@ interface SpeechBubbleProps {
 
 export const SpeechBubble: React.FC<SpeechBubbleProps> = ({
   message,
+  spriteState,
   onClose,
   onAction,
   onMouseEnter,
@@ -52,9 +54,12 @@ export const SpeechBubble: React.FC<SpeechBubbleProps> = ({
     if (onAction) onAction(message.actionData)
   }
 
+  const stateClass =
+    spriteState === 'sleep' ? 'bubble-sleep' : spriteState === 'fly' ? 'bubble-fly' : ''
+
   return (
     <div
-      className="speech-bubble-bridge"
+      className={`speech-bubble-bridge ${stateClass}`.trim()}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       onMouseDown={(e) => {
