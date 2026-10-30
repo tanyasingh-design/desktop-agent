@@ -35,14 +35,15 @@
   user-select: none;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   width: 100vw;
   height: 100vh;
   margin: 0;
   padding: 0;
   overflow: hidden;
   background: transparent !important;
-  pointer-events: none;
   font-family: var(--font-retro);
   -webkit-font-smoothing: none;
   image-rendering: pixelated;
@@ -52,92 +53,30 @@ html, body, #root {
 /* ── Companion Wrapper ──────────────────────── */
 .companion-wrapper {
   position: absolute;
-  pointer-events: auto;
-  cursor: grab;
+  pointer-events: auto !important;
+  cursor: pointer;
   z-index: 1000;
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* 1% alpha ensures Windows layered window hit-testing never drops clicks on transparent canvas gaps */
+  background: rgba(0, 0, 0, 0.01);
+  border-radius: 12px;
+  padding: 4px;
 }
 
 .companion-wrapper:active {
   cursor: grabbing;
 }
 
-.companion-wrapper.walking {
-  transition: left var(--walk-duration, 3s) linear, top 0.2s ease-out;
-}
-
-.companion-wrapper.flying {
-  transition: left 1.6s cubic-bezier(0.25, 1, 0.5, 1), top 1.6s cubic-bezier(0.25, 1, 0.5, 1);
-}
-
-.companion-sprite {
-  width: 130px;
-  height: auto;
-  display: block;
+.companion-wrapper canvas {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.55));
-  transition: filter 0.2s ease, transform 0.2s ease;
+  transition: filter 0.15s ease;
 }
 
-.companion-sprite:hover {
-  filter: drop-shadow(0 0 16px var(--spirit-cyan-glow)) drop-shadow(0 8px 14px rgba(0,0,0,0.7));
-  transform: scale(1.04);
-}
-
-/* Idle is grounded with zero floating */
-.anim-idle {
-  transform: none;
-}
-
-.anim-sleep {
-  transform: none;
-}
-
-.anim-remind {
-  transform: none;
-}
-
-.anim-snack {
-  transform: none;
-}
-
-/* Walking stride animation */
-@keyframes companion-walk-step {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-4px);
-  }
-}
-
-.anim-walk {
-  animation: companion-walk-step 0.35s ease-in-out infinite;
-}
-
-/* Flying Flight Momentum */
-@keyframes companion-fly {
-  0%, 100% {
-    transform: translateY(0) rotate(0deg);
-  }
-  50% {
-    transform: translateY(-8px) rotate(-1deg);
-  }
-}
-
-.anim-fly {
-  animation: companion-fly 1.2s ease-in-out infinite;
-}
-
-/* Horizontal Direction Flip */
-.facing-left canvas {
-  transform: scaleX(-1);
-}
-.facing-right canvas {
-  transform: scaleX(1);
+.companion-wrapper:hover canvas {
+  filter: drop-shadow(0 0 12px var(--spirit-cyan-glow)) drop-shadow(0 6px 12px rgba(0, 0, 0, 0.65)) !important;
 }
 
 /* Sleep ZZZ particles */
@@ -157,10 +96,12 @@ html, body, #root {
     opacity: 0;
     transform: translate(0, 0) scale(0.6);
   }
+
   50% {
     opacity: 1;
     transform: translate(10px, -15px) scale(1);
   }
+
   100% {
     opacity: 0;
     transform: translate(20px, -30px) scale(1.3);
@@ -168,10 +109,20 @@ html, body, #root {
 }
 
 /* ── Pixel Speech Bubble ─────────────────────── */
-.speech-bubble {
+.speech-bubble-bridge {
   position: absolute;
   bottom: 100%;
-  margin-bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding-bottom: 14px;
+  pointer-events: auto !important;
+  z-index: 1050;
+  background: rgba(0, 0, 0, 0.01);
+  cursor: pointer;
+}
+
+.speech-bubble {
+  position: relative;
   background: #ffffff;
   color: #0f172a;
   border: 3px solid #000000;
@@ -179,10 +130,9 @@ html, body, #root {
   border-radius: 4px;
   padding: 10px 14px;
   max-width: 240px;
-  min-width: 140px;
-  pointer-events: auto;
+  min-width: 165px;
+  pointer-events: auto !important;
   cursor: pointer;
-  z-index: 1050;
   animation: pop-in 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
@@ -207,14 +157,47 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding-right: 10px;
 }
 
-.speech-bubble-close {
-  align-self: flex-end;
-  font-size: 9px;
+.speech-bubble-typewriter {
+  min-height: 2.8em;
+  word-break: break-word;
+}
+
+.typewriter-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  color: #0284c7;
+  animation: blink-cursor 0.55s steps(2, start) infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.speech-bubble-dismiss-btn {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  background: transparent;
+  border: none;
   color: #64748b;
-  margin-top: 2px;
-  text-decoration: underline;
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  z-index: 2;
+}
+
+.speech-bubble-dismiss-btn:hover {
+  color: #ef4444;
 }
 
 @keyframes pop-in {
@@ -222,6 +205,7 @@ html, body, #root {
     opacity: 0;
     transform: scale(0.8) translateY(10px);
   }
+
   100% {
     opacity: 1;
     transform: scale(1) translateY(0);
@@ -264,6 +248,7 @@ html, body, #root {
     opacity: 0;
     transform: scale(0.94) translateY(10px);
   }
+
   100% {
     opacity: 1;
     transform: scale(1) translateY(0);
@@ -411,6 +396,7 @@ html, body, #root {
   border-color: var(--pixel-border-bright);
   box-shadow: 0 3px 0 #111622;
 }
+
 .pixel-btn.secondary:hover {
   background: #313b52;
 }
@@ -568,9 +554,11 @@ html, body, #root {
 ::-webkit-scrollbar {
   width: 6px;
 }
+
 ::-webkit-scrollbar-track {
   background: #0a0d14;
 }
+
 ::-webkit-scrollbar-thumb {
   background: var(--pixel-border-bright);
   border-radius: 2px;

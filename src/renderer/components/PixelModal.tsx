@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react'
 import type { Task, DailyGoal, CompanionSettings, SpriteState } from '../types'
 import { sounds } from '../lib/sound'
+import { CompanionSprite } from './CompanionSprite'
 
 interface PixelModalProps {
   isOpen: boolean
   onClose: () => void
   tasks: Task[]
-  onAddTask: (text: string, category: 'today' | 'future') => void
+  onAddTask: (text: string, category: 'today' | 'future', reminderMinutes: number) => void
   onToggleTask: (id: string) => void
   onDeleteTask: (id: string) => void
   dailyGoal: DailyGoal
@@ -15,9 +16,71 @@ interface PixelModalProps {
   onUpdateSettings: (settings: Partial<CompanionSettings>) => void
   onTriggerState: (state: SpriteState, durationMs?: number) => void
   onFlyToSafeZone: () => void
+  onWalkAcrossFloor: () => void
+  onTriggerRoamNow: () => void
 }
 
-type TabType = 'tasks' | 'pomodoro' | 'goals' | 'settings'
+type TabType = 'tasks' | 'pomodoro' | 'goals' | 'states' | 'settings'
+
+interface StateInfo {
+  id: SpriteState
+  name: string
+  label: string
+  description: string
+  trigger: string
+}
+
+const ALL_STATES: StateInfo[] = [
+  {
+    id: 'idle',
+    name: 'Neutral',
+    label: 'NEUTRAL',
+    description: 'Sits calmly on the floor for 45–60s at a time. Eyes blink naturally with cyan spirit wisps.',
+    trigger: 'Default calm desktop companion pose (45–60s intervals)'
+  },
+  {
+    id: 'walk',
+    name: 'Walking',
+    label: 'WALKING',
+    description: 'Walks slowly and steadily on all fours horizontally along the bottom edge.',
+    trigger: 'Horizontal floor strolls between calm idle rests'
+  },
+  {
+    id: 'fly',
+    name: 'Flying',
+    label: 'FLYING',
+    description: 'Full 4-beat flapping wings for diagonal traversal or flying up to a top corner.',
+    trigger: 'Typing avoidance (flies to top corner) & diagonal edge movement'
+  },
+  {
+    id: 'remind',
+    name: 'Reminder',
+    label: 'REMINDER',
+    description: 'Alert posture, raised waving paw, wide cyan eyes, and [!] alert prompt.',
+    trigger: 'Fires when your 35–40 min task reminder timer is reached'
+  },
+  {
+    id: 'angry',
+    name: 'Angry / Neglect Stage 1',
+    label: 'ANGRY',
+    description: 'Bared teeth, blazing cyan flames, and warning text when a task is ignored after a reminder.',
+    trigger: 'Task still incomplete 10 mins after Reminder (+15s in Demo Mode)'
+  },
+  {
+    id: 'sad',
+    name: 'Sad / Neglect Stage 2',
+    label: 'SAD',
+    description: 'Drooped ears, slumped posture, and falling tear drops when a task is neglected for a long time.',
+    trigger: 'Task still incomplete 20 mins after Reminder (+30s in Demo Mode)'
+  },
+  {
+    id: 'sleep',
+    name: 'Sleeping',
+    label: 'SLEEPING',
+    description: 'Curled up peacefully on fluffy tail with rising animated pixel "Z z z..." particles.',
+    trigger: 'Undisturbed / no interaction for 3 minutes (30s in Demo Mode)'
+  }
+]
 
 export const PixelModal: React.FC<PixelModalProps> = ({
   isOpen,
@@ -31,11 +94,18 @@ export const PixelModal: React.FC<PixelModalProps> = ({
   settings,
   onUpdateSettings,
   onTriggerState,
-  onFlyToSafeZone
+  onFlyToSafeZone,
+  onWalkAcrossFloor,
+  onTriggerRoamNow
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('tasks')
   const [newTaskText, setNewTaskText] = useState('')
   const [taskCategory, setTaskCategory] = useState<'today' | 'future'>('today')
+  const [taskReminderMins, setTaskReminderMins] = useState<number>(settings.taskReminderMinutes || 35)
+
+  useEffect(() => {
+    setTaskReminderMins(settings.taskReminderMinutes || 35)
+  }, [settings.taskReminderMinutes])
 
   // Pomodoro State
   const [pomoMode, setPomoMode] = useState<'focus' | 'shortBreak' | 'longBreak'>('focus')
@@ -80,7 +150,7 @@ export const PixelModal: React.FC<PixelModalProps> = ({
     e.preventDefault()
     if (!newTaskText.trim()) return
     sounds.playClick()
-    onAddTask(newTaskText.trim(), taskCategory)
+    onAddTask(newTaskText.trim(), taskCategory, taskReminderMins)
     setNewTaskText('')
   }
 
@@ -94,7 +164,7 @@ export const PixelModal: React.FC<PixelModalProps> = ({
     sounds.playClick()
     if (!pomoIsRunning) {
       if (pomoMode === 'focus') {
-        onTriggerState('idle')
+        onTriggerState('angry', 6000)
       } else {
         onTriggerState('sleep')
       }
@@ -127,7 +197,7 @@ export const PixelModal: React.FC<PixelModalProps> = ({
       onClick={onClose}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="pixel-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="pixel-modal" style={{ width: '620px' }} onClick={(e) => e.stopPropagation()}>
         {/* Title Bar */}
         <div className="modal-title-bar">
           <div className="modal-title">
@@ -160,6 +230,12 @@ export const PixelModal: React.FC<PixelModalProps> = ({
             🎯 GOALS
           </button>
           <button
+            className={`modal-tab ${activeTab === 'states' ? 'active' : ''}`}
+            onClick={() => handleTabChange('states')}
+          >
+            🧪 STATES LAB
+          </button>
+          <button
             className={`modal-tab ${activeTab === 'settings' ? 'active' : ''}`}
             onClick={() => handleTabChange('settings')}
           >
@@ -182,10 +258,23 @@ export const PixelModal: React.FC<PixelModalProps> = ({
                   autoFocus
                 />
                 <select
+                  value={taskReminderMins}
+                  onChange={(e) => setTaskReminderMins(Number(e.target.value))}
+                  className="pixel-input"
+                  style={{ width: '92px', cursor: 'pointer', flex: 'none' }}
+                  title="Schedule task reminder timer"
+                >
+                  <option value={20}>⏰ 20m</option>
+                  <option value={30}>⏰ 30m</option>
+                  <option value={35}>⏰ 35m</option>
+                  <option value={40}>⏰ 40m</option>
+                  <option value={60}>⏰ 60m</option>
+                </select>
+                <select
                   value={taskCategory}
                   onChange={(e) => setTaskCategory(e.target.value as 'today' | 'future')}
                   className="pixel-input"
-                  style={{ width: '100px', cursor: 'pointer' }}
+                  style={{ width: '88px', cursor: 'pointer', flex: 'none' }}
                 >
                   <option value="today">Today</option>
                   <option value="future">Later</option>
@@ -223,6 +312,21 @@ export const PixelModal: React.FC<PixelModalProps> = ({
                           {task.completed ? '✓' : ''}
                         </div>
                         <span className="task-text">{task.text}</span>
+                        {!task.completed && (
+                          <span
+                            style={{
+                              fontSize: '9px',
+                              padding: '2px 6px',
+                              background: '#17253b',
+                              border: '1px solid #2b4c7e',
+                              borderRadius: '2px',
+                              color: 'var(--spirit-cyan)',
+                              flexShrink: 0
+                            }}
+                          >
+                            ⏰ {task.reminderMinutes || settings.taskReminderMinutes || 35}m
+                          </span>
+                        )}
                         {task.category === 'future' && (
                           <span
                             style={{
@@ -398,13 +502,171 @@ export const PixelModal: React.FC<PixelModalProps> = ({
             </div>
           )}
 
+          {/* ── STATES LAB TAB ───────────────────── */}
+          {activeTab === 'states' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ borderBottom: '1px solid var(--pixel-border)', paddingBottom: '8px' }}>
+                <div className="settings-label" style={{ color: 'var(--spirit-cyan)' }}>
+                  🧪 COMPANION STATE GALLERY & TESTING LAB
+                </div>
+                <div className="settings-desc">
+                  Live interactive preview of all 7 pixelated states. Click any state to activate it on your desktop!
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                  gap: '12px',
+                  maxHeight: '380px',
+                  overflowY: 'auto',
+                  paddingRight: '4px'
+                }}
+              >
+                {ALL_STATES.map((st) => (
+                  <div
+                    key={st.id}
+                    className="settings-row"
+                    style={{
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      textAlign: 'center',
+                      gap: '10px',
+                      padding: '16px 12px'
+                    }}
+                  >
+                    {/* Live mini pixel preview */}
+                    <div
+                      style={{
+                        background: '#090b10',
+                        border: '2px solid var(--pixel-border)',
+                        borderRadius: '4px',
+                        padding: '10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minHeight: '110px',
+                        width: '100%'
+                      }}
+                    >
+                      <CompanionSprite state={st.id} scale={126} />
+                    </div>
+
+                    <div>
+                      <div className="settings-label" style={{ color: 'var(--spirit-cyan)', fontSize: '11px' }}>
+                        {st.label} ({st.name})
+                      </div>
+                      <div className="settings-desc" style={{ marginTop: '4px', lineHeight: '1.4' }}>
+                        {st.description}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: '9px',
+                          color: '#64748b',
+                          marginTop: '4px',
+                          background: 'rgba(0,0,0,0.3)',
+                          padding: '2px 6px',
+                          borderRadius: '2px'
+                        }}
+                      >
+                        ⚡ {st.trigger}
+                      </div>
+                    </div>
+
+                    <button
+                      className="pixel-btn"
+                      style={{ fontSize: '9px', width: '100%', justifyContent: 'center' }}
+                      onClick={() => {
+                        sounds.playSuccess()
+                        onTriggerState(st.id, 12000)
+                      }}
+                    >
+                      ▶ TEST ON DESKTOP
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* ── SETTINGS TAB ─────────────────────── */}
           {activeTab === 'settings' && (
             <div className="settings-group">
               <div className="settings-row">
                 <div>
-                  <div className="settings-label">Auto-Roam & Fly</div>
-                  <div className="settings-desc">Periodically wander around screen</div>
+                  <div className="settings-label">Companion Size</div>
+                  <div className="settings-desc">Balanced pixel scale on desktop (M = 165px default)</div>
+                </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {[
+                    { label: 'S', value: 136 },
+                    { label: 'M', value: 165 },
+                    { label: 'L', value: 204 },
+                    { label: 'XL', value: 238 }
+                  ].map((sz) => (
+                    <button
+                      key={sz.value}
+                      className={`pixel-btn ${settings.petScale === sz.value ? '' : 'secondary'}`}
+                      style={{ fontSize: '9px', padding: '5px 10px' }}
+                      onClick={() => {
+                        sounds.playClick()
+                        onUpdateSettings({ petScale: sz.value })
+                      }}
+                    >
+                      {sz.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-row">
+                <div>
+                  <div className="settings-label">Task Reminder Schedule</div>
+                  <div className="settings-desc">Remind after 35–40m → Angry (+10m) → Sad (+20m)</div>
+                </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {[20, 30, 35, 40, 60].map((mins) => (
+                    <button
+                      key={mins}
+                      className={`pixel-btn ${(settings.taskReminderMinutes || 35) === mins ? '' : 'secondary'}`}
+                      style={{ fontSize: '9px', padding: '5px 8px' }}
+                      onClick={() => {
+                        sounds.playClick()
+                        onUpdateSettings({ taskReminderMinutes: mins })
+                      }}
+                    >
+                      {mins}m
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-row">
+                <div>
+                  <div className="settings-label">Timing Pace Mode</div>
+                  <div className="settings-desc">
+                    {settings.fastDemoMode
+                      ? 'Fast Demo: Sleep 30s • Remind 20s → Angry 35s → Sad 50s'
+                      : 'Normal: Idle 45–60s • Sleep 3m • Remind 35–40m'}
+                  </div>
+                </div>
+                <button
+                  className={`pixel-btn ${settings.fastDemoMode ? '' : 'secondary'}`}
+                  style={{ fontSize: '9px' }}
+                  onClick={() => {
+                    sounds.playClick()
+                    onUpdateSettings({ fastDemoMode: !settings.fastDemoMode })
+                  }}
+                >
+                  {settings.fastDemoMode ? '⚡ FAST DEMO (SEC)' : '🕒 REALISTIC (35-40M)'}
+                </button>
+              </div>
+
+              <div className="settings-row">
+                <div>
+                  <div className="settings-label">Auto-Roam & Slow Stroll</div>
+                  <div className="settings-desc">Calm horizontal floor walking & 3-min undisturbed sleep</div>
                 </div>
                 <button
                   className={`pixel-btn ${settings.roamingEnabled ? '' : 'secondary'}`}
@@ -420,8 +682,8 @@ export const PixelModal: React.FC<PixelModalProps> = ({
 
               <div className="settings-row">
                 <div>
-                  <div className="settings-label">Typing Avoidance</div>
-                  <div className="settings-desc">Fly away when you type or work near it</div>
+                  <div className="settings-label">Typing Avoidance (Fly to Top Corner)</div>
+                  <div className="settings-desc">Flies diagonally to top corner when you type</div>
                 </div>
                 <select
                   value={settings.typingAvoidance}
@@ -459,43 +721,44 @@ export const PixelModal: React.FC<PixelModalProps> = ({
                 </button>
               </div>
 
+              {/* Movement Test Triggers */}
               <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
                 <div>
-                  <div className="settings-label">Companion Mood / State Preview</div>
-                  <div className="settings-desc">Instantly test all 7 pixelated states</div>
+                  <div className="settings-label">Movement Actions & Tests</div>
+                  <div className="settings-desc">Manually trigger walking, flying, or roaming now</div>
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', width: '100%' }}>
-                  {(['idle', 'walk', 'fly', 'angry', 'sad', 'remind', 'sleep'] as SpriteState[]).map((st) => (
-                    <button
-                      key={st}
-                      className="pixel-btn secondary"
-                      style={{ fontSize: '9px', padding: '5px 8px', textTransform: 'uppercase' }}
-                      onClick={() => {
-                        sounds.playPop()
-                        onTriggerState(st, 8000)
-                      }}
-                    >
-                      {st}
-                    </button>
-                  ))}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', width: '100%' }}>
+                  <button
+                    className="pixel-btn"
+                    style={{ fontSize: '9px' }}
+                    onClick={() => {
+                      sounds.playClick()
+                      onWalkAcrossFloor()
+                    }}
+                  >
+                    🐾 WALK ON FLOOR
+                  </button>
+                  <button
+                    className="pixel-btn secondary"
+                    style={{ fontSize: '9px' }}
+                    onClick={() => {
+                      sounds.playPop()
+                      onTriggerRoamNow()
+                    }}
+                  >
+                    ✨ TRIGGER AUTO-ROAM
+                  </button>
+                  <button
+                    className="pixel-btn secondary"
+                    style={{ fontSize: '9px' }}
+                    onClick={() => {
+                      sounds.playClick()
+                      onFlyToSafeZone()
+                    }}
+                  >
+                    🚀 FLY TO CORNER
+                  </button>
                 </div>
-              </div>
-
-              <div className="settings-row">
-                <div>
-                  <div className="settings-label">Evacuate to Corner</div>
-                  <div className="settings-desc">Send companion to safe desktop corner now</div>
-                </div>
-                <button
-                  className="pixel-btn"
-                  style={{ fontSize: '9px' }}
-                  onClick={() => {
-                    sounds.playClick()
-                    onFlyToSafeZone()
-                  }}
-                >
-                  🚀 FLY AWAY
-                </button>
               </div>
 
               <div className="settings-row" style={{ borderTop: '2px solid #3d1c24' }}>

@@ -9,6 +9,8 @@ export interface Task {
   priority: 'low' | 'medium' | 'high'
   category: 'today' | 'future'
   createdAt: number
+  reminderMinutes?: number // e.g., 20, 35, 40, 60
+  lastNotifiedStage?: 'none' | 'remind' | 'angry' | 'sad'
 }
 
 export interface DailyGoal {
@@ -29,7 +31,10 @@ export interface CompanionSettings {
   roamIntervalSeconds: number
   typingAvoidance: 'high' | 'normal' | 'low' | 'off'
   bubbleFrequencyMinutes: number
-  petScale: number // 100, 130, 160
+  taskReminderMinutes: number // Default 35 or 40 minutes
+  fastDemoMode: boolean // Allows testing the full sleep/remind/angry/sad lifecycle in seconds
+  showSpeechBubble: boolean // Keep speech bubble attached above Ash
+  petScale: number // 136, 165, 204, 238
   pomodoro: PomodoroSettings
 }
 

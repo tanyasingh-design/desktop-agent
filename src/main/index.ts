@@ -63,8 +63,21 @@ app.whenReady().then(() => {
 
   ipcMain.on('window:set-ignore-mouse-events', (_event, ignore: boolean, options?: { forward: boolean }) => {
     if (!mainWindow || mainWindow.isDestroyed()) return
-    mainWindow.setIgnoreMouseEvents(ignore, options)
+    if (ignore) {
+      mainWindow.setIgnoreMouseEvents(true, options ?? { forward: true })
+    } else {
+      mainWindow.setIgnoreMouseEvents(false)
+    }
   })
+
+  ipcMain.on(
+    'window:set-hit-bounds',
+    (_event, bounds: { x: number; y: number; width: number; height: number; modalOpen: boolean }) => {
+      if (bounds.modalOpen && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setIgnoreMouseEvents(false)
+      }
+    }
+  )
 
   ipcMain.on('app:quit', () => {
     app.quit()
