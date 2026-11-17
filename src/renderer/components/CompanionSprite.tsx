@@ -404,13 +404,7 @@ export const CompanionSprite: React.FC<CompanionSpriteProps> = ({
 
       x.clearRect(0, 0, LOGICAL_W, LOGICAL_H)
 
-      // 1. Dynamic Pixel Ground Shadow on the floor baseline (OY + 1)
-      const shadowW = Math.max(8, rd(22 - localPy * 0.9))
-      x.globalAlpha = 0.28
-      Q(OX - (shadowW >> 1), OY + 1, shadowW, 2, 'o')
-      x.globalAlpha = 1
-
-      // 2. Draw character onto low-res spr buffer
+      // 1. Draw character onto low-res spr buffer
       if (activeState === 'sleep') {
         drawSleepWolf(fr)
       } else {
@@ -546,8 +540,7 @@ export const CompanionSprite: React.FC<CompanionSpriteProps> = ({
           width: `${scale}px`,
           height: `${Math.round((scale * LOGICAL_H) / LOGICAL_W)}px`,
           display: 'block',
-          imageRendering: 'pixelated',
-          filter: 'drop-shadow(0 5px 12px rgba(0, 0, 0, 0.5))'
+          imageRendering: 'pixelated'
         }}
       />
     </div>

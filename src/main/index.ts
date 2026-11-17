@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, powerMonitor, screen, shell } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 
@@ -84,6 +84,58 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+
+  // Global typing detection: Option A (uiohook-napi) with Option B (powerMonitor) fallback
+  let lastTypingSent = 0
+  let fallbackInterval: NodeJS.Timeout | null = null
+  let uiohookStarted = false
+
+  const emitTypingPing = () => {
+    const now = Date.now()
+    if (now - lastTypingSent < 500) return
+    lastTypingSent = now
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('user:typing')
+    }
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { uIOhook } = require('uiohook-napi') as {
+      uIOhook: { on: (event: string, cb: () => void) => void; start: () => void; stop: () => void }
+    }
+    uIOhook.on('keydown', emitTypingPing)
+    uIOhook.start()
+    uiohookStarted = true
+
+    app.on('will-quit', () => {
+      try {
+        uIOhook.stop()
+      } catch {
+        // ignore cleanup errors
+      }
+    })
+  } catch {
+    // Fallback Option B: powerMonitor idle time + cursor movement check
+    let lastCursor = screen.getCursorScreenPoint()
+    fallbackInterval = setInterval(() => {
+      const idle = powerMonitor.getSystemIdleTime()
+      const cur = screen.getCursorScreenPoint()
+      const moved = cur.x !== lastCursor.x || cur.y !== lastCursor.y
+      lastCursor = cur
+      if (idle < 1 && !moved) {
+        emitTypingPing()
+      }
+    }, 400)
+
+    app.on('will-quit', () => {
+      if (fallbackInterval) clearInterval(fallbackInterval)
+    })
+  }
+
+  if (!uiohookStarted && !fallbackInterval) {
+    // No-op guard
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

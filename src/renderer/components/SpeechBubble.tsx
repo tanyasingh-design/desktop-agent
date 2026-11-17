@@ -6,6 +6,8 @@ interface SpeechBubbleProps {
   spriteState?: SpriteState
   onClose?: () => void
   onAction?: (actionData?: string) => void
+  onYes?: () => void
+  onNo?: () => void
   onMouseEnter?: () => void
   onMouseLeave?: () => void
 }
@@ -15,6 +17,8 @@ export const SpeechBubble: React.FC<SpeechBubbleProps> = ({
   spriteState,
   onClose,
   onAction,
+  onYes,
+  onNo,
   onMouseEnter,
   onMouseLeave
 }) => {
@@ -93,25 +97,41 @@ export const SpeechBubble: React.FC<SpeechBubbleProps> = ({
             {typedText}
             {isTyping && <span className="typewriter-cursor">▋</span>}
           </span>
-          {message.actionLabel && (
-            <button
-              type="button"
-              className="pixel-btn"
-              style={{
-                fontSize: '9px',
-                padding: '4px 8px',
-                marginTop: '3px',
-                width: '100%',
-                justifyContent: 'center'
-              }}
-              onMouseDown={(e) => {
-                if (e.button !== 0) return
-                handleTrigger(e)
-              }}
-              onClick={handleTrigger}
-            >
-              {message.actionLabel}
-            </button>
+          {message.showYesNo && (
+            <div style={{ display: 'flex', gap: '8px', marginTop: '2px' }}>
+              <button
+                type="button"
+                className="paper-btn-dark"
+                style={{ flex: 1, padding: '7px 10px', fontSize: '9px' }}
+                onMouseDown={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  if (onYes) onYes()
+                }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                }}
+              >
+                YES
+              </button>
+              <button
+                type="button"
+                className="paper-btn-ghost"
+                style={{ flex: 1, padding: '7px 10px', fontSize: '11px' }}
+                onMouseDown={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  if (onNo) onNo()
+                }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                }}
+              >
+                No
+              </button>
+            </div>
           )}
         </div>
       </div>

@@ -22,6 +22,7 @@
     "electron-store": "^11.0.2",
     "lowdb": "^7.0.1",
     "lucide-react": "^1.27.0",
+    "uiohook-napi": "^1.5.5",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

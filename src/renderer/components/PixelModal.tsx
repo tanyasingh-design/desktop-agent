@@ -11,21 +11,28 @@ interface PixelModalProps {
   onToggleTask: (id: string) => void
   onDeleteTask: (id: string) => void
   dailyGoal: DailyGoal
+  previousGoals: string[]
   onUpdateDailyGoal: (goal: Partial<DailyGoal>) => void
+  onRemoveDailyGoal: () => void
   settings: CompanionSettings
   onUpdateSettings: (settings: Partial<CompanionSettings>) => void
   onTriggerState: (state: SpriteState, durationMs?: number) => void
+  onStartBreathing: () => void
+  onTestWaterReminder: () => void
+  onTestEyeRestReminder: () => void
+  onReplayOnboarding: () => void
+  onLoadVideoDemo: () => void
+  onClearDemoData: () => void
   onFlyToSafeZone: () => void
   onWalkAcrossFloor: () => void
   onTriggerRoamNow: () => void
 }
 
-type TabType = 'tasks' | 'pomodoro' | 'goals' | 'states' | 'settings'
+type TabType = 'goals' | 'tasks' | 'pomodoro' | 'states' | 'settings'
 
 interface StateInfo {
   id: SpriteState
   name: string
-  label: string
   description: string
   trigger: string
 }
@@ -34,51 +41,44 @@ const ALL_STATES: StateInfo[] = [
   {
     id: 'idle',
     name: 'Neutral',
-    label: 'NEUTRAL',
-    description: 'Sits calmly on the floor for 45–60s at a time. Eyes blink naturally with cyan spirit wisps.',
-    trigger: 'Default calm desktop companion pose (45–60s intervals)'
+    description: 'Sits calmly on the floor between walks with natural blinking and spirit wisps.',
+    trigger: 'Default resting pose (45–60s intervals)'
   },
   {
     id: 'walk',
     name: 'Walking',
-    label: 'WALKING',
-    description: 'Walks slowly and steadily on all fours horizontally along the bottom edge.',
-    trigger: 'Horizontal floor strolls between calm idle rests'
+    description: 'Walks slowly on all fours horizontally along the bottom of your screen.',
+    trigger: 'Calm floor strolls between rests'
   },
   {
     id: 'fly',
     name: 'Flying',
-    label: 'FLYING',
-    description: 'Full 4-beat flapping wings for diagonal traversal or flying up to a top corner.',
-    trigger: 'Typing avoidance (flies to top corner) & diagonal edge movement'
+    description: 'Full 4-beat wing flapping for diagonal movement or perching in a top corner.',
+    trigger: 'Flies to top corner when you type'
   },
   {
     id: 'remind',
     name: 'Reminder',
-    label: 'REMINDER',
-    description: 'Alert posture, raised waving paw, wide cyan eyes, and [!] alert prompt.',
-    trigger: 'Fires when your 35–40 min task reminder timer is reached'
+    description: 'Alert posture with a raised waving paw and [!] alert prompt.',
+    trigger: 'Task, water, or eye-rest reminder'
   },
   {
     id: 'angry',
-    name: 'Angry / Neglect Stage 1',
-    label: 'ANGRY',
-    description: 'Bared teeth, blazing cyan flames, and warning text when a task is ignored after a reminder.',
-    trigger: 'Task still incomplete 10 mins after Reminder (+15s in Demo Mode)'
+    name: 'Angry',
+    description: 'Blazing cyan flames and warning message when a task is still incomplete.',
+    trigger: '10 min after Reminder (+15s in Demo Mode)'
   },
   {
     id: 'sad',
-    name: 'Sad / Neglect Stage 2',
-    label: 'SAD',
-    description: 'Drooped ears, slumped posture, and falling tear drops when a task is neglected for a long time.',
-    trigger: 'Task still incomplete 20 mins after Reminder (+30s in Demo Mode)'
+    name: 'Sad',
+    description: 'Drooped ears and falling tears when a task stays incomplete for too long.',
+    trigger: '20 min after Reminder (+30s in Demo Mode)'
   },
   {
     id: 'sleep',
     name: 'Sleeping',
-    label: 'SLEEPING',
-    description: 'Curled up peacefully on fluffy tail with rising animated pixel "Z z z..." particles.',
-    trigger: 'Undisturbed / no interaction for 3 minutes (30s in Demo Mode)'
+    description: 'Curled up peacefully with rising pixel Zzz particles.',
+    trigger: '3 min undisturbed (30s in Demo Mode)'
   }
 ]
 
@@ -90,18 +90,31 @@ export const PixelModal: React.FC<PixelModalProps> = ({
   onToggleTask,
   onDeleteTask,
   dailyGoal,
+  previousGoals,
   onUpdateDailyGoal,
+  onRemoveDailyGoal,
   settings,
   onUpdateSettings,
   onTriggerState,
+  onStartBreathing,
+  onTestWaterReminder,
+  onTestEyeRestReminder,
+  onReplayOnboarding,
+  onLoadVideoDemo,
+  onClearDemoData,
   onFlyToSafeZone,
   onWalkAcrossFloor,
   onTriggerRoamNow
 }) => {
-  const [activeTab, setActiveTab] = useState<TabType>('tasks')
+  // Goal tab is first as requested
+  const [activeTab, setActiveTab] = useState<TabType>('goals')
   const [newTaskText, setNewTaskText] = useState('')
   const [taskCategory, setTaskCategory] = useState<'today' | 'future'>('today')
   const [taskReminderMins, setTaskReminderMins] = useState<number>(settings.taskReminderMinutes || 35)
+
+  // Goal inline editing state
+  const [goalDraft, setGoalDraft] = useState('')
+  const [isEditingGoal, setIsEditingGoal] = useState(false)
 
   useEffect(() => {
     setTaskReminderMins(settings.taskReminderMinutes || 35)
@@ -112,6 +125,18 @@ export const PixelModal: React.FC<PixelModalProps> = ({
   const [pomoTimeLeft, setPomoTimeLeft] = useState(settings.pomodoro.focusMinutes * 60)
   const [pomoIsRunning, setPomoIsRunning] = useState(false)
   const [pomoCycles, setPomoCycles] = useState(0)
+
+  const totalPomoSeconds =
+    pomoMode === 'focus'
+      ? settings.pomodoro.focusMinutes * 60
+      : pomoMode === 'shortBreak'
+        ? settings.pomodoro.shortBreakMinutes * 60
+        : settings.pomodoro.longBreakMinutes * 60
+
+  const pomoProgressPct = Math.max(
+    0,
+    Math.min(100, ((totalPomoSeconds - pomoTimeLeft) / Math.max(1, totalPomoSeconds)) * 100)
+  )
 
   // Pomodoro countdown timer
   useEffect(() => {
@@ -154,6 +179,15 @@ export const PixelModal: React.FC<PixelModalProps> = ({
     setNewTaskText('')
   }
 
+  const handleSaveGoal = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!goalDraft.trim()) return
+    sounds.playClick()
+    onUpdateDailyGoal({ title: goalDraft.trim(), completed: false })
+    setGoalDraft('')
+    setIsEditingGoal(false)
+  }
+
   const formatPomoTime = (seconds: number) => {
     const m = Math.floor(seconds / 60)
     const s = seconds % 60
@@ -188,316 +222,423 @@ export const PixelModal: React.FC<PixelModalProps> = ({
     }
   }
 
-  const completedCount = tasks.filter((t) => t.completed).length
-  const pendingCount = tasks.length - completedCount
+  const pendingTasks = tasks.filter((t) => !t.completed)
+  const todayTasks = tasks.filter((t) => t.category === 'today')
+  const laterTasks = tasks.filter((t) => t.category === 'future')
+
+  const renderTaskRow = (task: Task) => (
+    <div key={task.id} className={`task-item ${task.completed ? 'completed' : ''}`}>
+      <div className="task-left">
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={task.completed}
+          aria-label={`Mark "${task.text}" as ${task.completed ? 'incomplete' : 'complete'}`}
+          className={`pixel-checkbox ${task.completed ? 'checked' : ''}`}
+          onClick={() => {
+            if (!task.completed) {
+              sounds.playSuccess()
+              onTriggerState('remind', 5000)
+            } else {
+              sounds.playClick()
+            }
+            onToggleTask(task.id)
+          }}
+        >
+          {task.completed ? '✓' : ''}
+        </button>
+        <span className="task-text">{task.text}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+        {!task.completed && (
+          <>
+            <span style={{ fontSize: '11px', color: 'var(--ink-muted)', fontWeight: 600 }}>
+              {task.reminderMinutes || settings.taskReminderMinutes || 35}m
+            </span>
+            <button
+              type="button"
+              className="paper-link-btn"
+              style={{ color: 'var(--ink-primary)' }}
+              onClick={() => {
+                sounds.playClick()
+                setActiveTab('pomodoro')
+                setPomoMode('focus')
+                setPomoTimeLeft(settings.pomodoro.focusMinutes * 60)
+                setPomoIsRunning(true)
+                onTriggerState('angry', 6000)
+              }}
+            >
+              START
+            </button>
+          </>
+        )}
+        <button
+          type="button"
+          className="task-del-btn"
+          onClick={() => {
+            sounds.playClick()
+            onDeleteTask(task.id)
+          }}
+          aria-label={`Delete "${task.text}"`}
+          title="Delete task"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+  )
 
   return (
     <div
       className="pixel-modal-backdrop"
       onClick={onClose}
       onMouseDown={(e) => e.stopPropagation()}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Ash Companion Panel"
     >
-      <div className="pixel-modal" style={{ width: '620px' }} onClick={(e) => e.stopPropagation()}>
+      <div className="pixel-modal" onClick={(e) => e.stopPropagation()}>
         {/* Title Bar */}
         <div className="modal-title-bar">
           <div className="modal-title">
-            <span>⚔️</span>
-            <span>SPIRIT COMPANION AGENT</span>
+            <span aria-hidden="true">🐾</span>
+            <span>ASH</span>
           </div>
-          <button className="modal-close-btn" onClick={onClose}>
-            [ESC / X]
+          <button
+            type="button"
+            className="modal-close-btn"
+            onClick={onClose}
+            aria-label="Close panel"
+          >
+            ✕ Close
           </button>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="modal-tabs">
+        {/* Single-Row Tab Navigation (Goals first!) */}
+        <div className="modal-tabs" role="tablist" aria-label="Companion sections">
           <button
-            className={`modal-tab ${activeTab === 'tasks' ? 'active' : ''}`}
-            onClick={() => handleTabChange('tasks')}
-          >
-            📋 TASKS ({pendingCount})
-          </button>
-          <button
-            className={`modal-tab ${activeTab === 'pomodoro' ? 'active' : ''}`}
-            onClick={() => handleTabChange('pomodoro')}
-          >
-            ⏳ POMODORO
-          </button>
-          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'goals'}
             className={`modal-tab ${activeTab === 'goals' ? 'active' : ''}`}
             onClick={() => handleTabChange('goals')}
           >
-            🎯 GOALS
+            Goals
           </button>
           <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'tasks'}
+            className={`modal-tab ${activeTab === 'tasks' ? 'active' : ''}`}
+            onClick={() => handleTabChange('tasks')}
+          >
+            Tasks ({pendingTasks.length})
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'pomodoro'}
+            className={`modal-tab ${activeTab === 'pomodoro' ? 'active' : ''}`}
+            onClick={() => handleTabChange('pomodoro')}
+          >
+            Pomodoro
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'states'}
             className={`modal-tab ${activeTab === 'states' ? 'active' : ''}`}
             onClick={() => handleTabChange('states')}
           >
-            🧪 STATES LAB
+            States
           </button>
           <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'settings'}
             className={`modal-tab ${activeTab === 'settings' ? 'active' : ''}`}
             onClick={() => handleTabChange('settings')}
           >
-            ⚙️ SETTINGS
+            Settings
           </button>
         </div>
 
         {/* Tab Content */}
         <div className="modal-body">
+          {/* ── GOALS TAB ("WHAT'S THE PLAN?") ───── */}
+          {activeTab === 'goals' && (
+            <div className="goals-center-stage">
+              <h2 className="paper-heading">WHAT&apos;S THE PLAN?</h2>
+
+              {!dailyGoal.title || isEditingGoal ? (
+                <form
+                  onSubmit={handleSaveGoal}
+                  className="underline-input-row"
+                  style={{ width: '100%', maxWidth: '380px' }}
+                >
+                  <span style={{ fontSize: '16px', color: 'var(--ink-primary)', fontWeight: 700 }}>+</span>
+                  <input
+                    type="text"
+                    className="underline-input"
+                    placeholder="Set your main goal for today..."
+                    aria-label="Main goal for today"
+                    value={goalDraft}
+                    onChange={(e) => setGoalDraft(e.target.value)}
+                    autoFocus
+                  />
+                  <button type="submit" className="paper-btn-ghost">
+                    Save
+                  </button>
+                  {isEditingGoal && (
+                    <button
+                      type="button"
+                      className="paper-btn-ghost"
+                      onClick={() => {
+                        setIsEditingGoal(false)
+                        setGoalDraft('')
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </form>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={dailyGoal.completed}
+                      aria-label="Mark daily goal completed"
+                      className={`pixel-checkbox ${dailyGoal.completed ? 'checked' : ''}`}
+                      style={{ width: '20px', height: '20px' }}
+                      onClick={() => {
+                        if (!dailyGoal.completed) {
+                          sounds.playSuccess()
+                          onTriggerState('remind', 5000)
+                        } else {
+                          sounds.playClick()
+                        }
+                        onUpdateDailyGoal({ completed: !dailyGoal.completed })
+                      }}
+                    >
+                      {dailyGoal.completed ? '✓' : ''}
+                    </button>
+                    <div
+                      style={{
+                        fontSize: '18px',
+                        fontWeight: 600,
+                        lineHeight: 1.35,
+                        color: dailyGoal.completed ? 'var(--ink-muted)' : 'var(--ink-primary)',
+                        textDecoration: dailyGoal.completed ? 'line-through' : 'none'
+                      }}
+                    >
+                      {dailyGoal.title}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '16px' }}>
+                    <button
+                      type="button"
+                      className="paper-link-btn"
+                      style={{ color: 'var(--spirit-cyan)' }}
+                      onClick={() => {
+                        setGoalDraft(dailyGoal.title)
+                        setIsEditingGoal(true)
+                      }}
+                    >
+                      EDIT
+                    </button>
+                    <button
+                      type="button"
+                      className="paper-link-btn"
+                      style={{ color: '#dc2626' }}
+                      onClick={() => {
+                        sounds.playClick()
+                        onRemoveDailyGoal()
+                      }}
+                    >
+                      REMOVE
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {previousGoals.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
+                  <div className="paper-section-label">PREVIOUS GOAL</div>
+                  <div style={{ fontSize: '13px', color: 'var(--ink-muted)', padding: '2px 0' }}>
+                    {previousGoals[0]}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── TASKS TAB ───────────────────────── */}
           {activeTab === 'tasks' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <form onSubmit={handleCreateTask} className="task-input-bar">
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '14px', minHeight: 0 }}>
+              {/* Top: Heading + Pill Selectors (Today/Later & Reminder mins) */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flexShrink: 0 }}>
+                <h2 className="paper-heading">TASKS</h2>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                  <div className="paper-pill-group" role="group" aria-label="Task schedule">
+                    <button
+                      type="button"
+                      className={`paper-pill ${taskCategory === 'today' ? 'active' : ''}`}
+                      onClick={() => setTaskCategory('today')}
+                    >
+                      Today
+                    </button>
+                    <button
+                      type="button"
+                      className={`paper-pill ${taskCategory === 'future' ? 'active' : ''}`}
+                      onClick={() => setTaskCategory('future')}
+                    >
+                      Later
+                    </button>
+                  </div>
+
+                  <div className="paper-pill-group" role="group" aria-label="Task reminder timer">
+                    {[20, 30, 35, 40, 60].map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        className={`paper-pill ${taskReminderMins === m ? 'active' : ''}`}
+                        onClick={() => setTaskReminderMins(m)}
+                      >
+                        {m}m
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Middle: Scrollable Task List */}
+              <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                {tasks.length === 0 ? (
+                  <div
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      textAlign: 'center',
+                      padding: '24px 16px',
+                      color: 'var(--ink-muted)',
+                      borderTop: '1px solid var(--paper-border)'
+                    }}
+                  >
+                    <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink-secondary)', marginBottom: '4px' }}>
+                      No tasks yet
+                    </p>
+                    <p style={{ fontSize: '12px', marginBottom: '14px' }}>
+                      Add a task below and Ash will remind you after {taskReminderMins}m.
+                    </p>
+                    <button
+                      type="button"
+                      className="paper-btn-ghost"
+                      onClick={() => {
+                        sounds.playPop()
+                        onLoadVideoDemo()
+                      }}
+                    >
+                      Load Sample Designer Tasks
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    {todayTasks.length > 0 && (
+                      <div>
+                        <div className="paper-section-label" style={{ marginBottom: '6px' }}>
+                          TODAY
+                        </div>
+                        <div className="task-list">{todayTasks.map(renderTaskRow)}</div>
+                      </div>
+                    )}
+
+                    {laterTasks.length > 0 && (
+                      <div>
+                        <div className="paper-section-label" style={{ marginBottom: '6px' }}>
+                          LATER
+                        </div>
+                        <div className="task-list">{laterTasks.map(renderTaskRow)}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Bottom: Google / iOS Style Underline Input */}
+              <form onSubmit={handleCreateTask} className="underline-input-row" style={{ flexShrink: 0 }}>
+                <span style={{ fontSize: '16px', color: 'var(--ink-primary)', fontWeight: 700 }}>+</span>
                 <input
                   type="text"
-                  className="pixel-input"
-                  placeholder="New quest or task..."
+                  className="underline-input"
+                  placeholder="Add a new task..."
+                  aria-label="Add a new task"
                   value={newTaskText}
                   onChange={(e) => setNewTaskText(e.target.value)}
                   autoFocus
                 />
-                <select
-                  value={taskReminderMins}
-                  onChange={(e) => setTaskReminderMins(Number(e.target.value))}
-                  className="pixel-input"
-                  style={{ width: '92px', cursor: 'pointer', flex: 'none' }}
-                  title="Schedule task reminder timer"
-                >
-                  <option value={20}>⏰ 20m</option>
-                  <option value={30}>⏰ 30m</option>
-                  <option value={35}>⏰ 35m</option>
-                  <option value={40}>⏰ 40m</option>
-                  <option value={60}>⏰ 60m</option>
-                </select>
-                <select
-                  value={taskCategory}
-                  onChange={(e) => setTaskCategory(e.target.value as 'today' | 'future')}
-                  className="pixel-input"
-                  style={{ width: '88px', cursor: 'pointer', flex: 'none' }}
-                >
-                  <option value="today">Today</option>
-                  <option value="future">Later</option>
-                </select>
-                <button type="submit" className="pixel-btn">
-                  + ADD
+                <button type="submit" className="paper-btn-ghost">
+                  Add
                 </button>
               </form>
-
-              {tasks.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '36px 0', color: 'var(--text-dim)' }}>
-                  <p style={{ fontSize: '13px', marginBottom: '6px' }}>NO ACTIVE TASKS</p>
-                  <p style={{ fontSize: '10px' }}>Your spirit companion is watching calmly.</p>
-                </div>
-              ) : (
-                <div className="task-list">
-                  {tasks.map((task) => (
-                    <div
-                      key={task.id}
-                      className={`task-item ${task.completed ? 'completed' : ''}`}
-                    >
-                      <div className="task-left">
-                        <div
-                          className={`pixel-checkbox ${task.completed ? 'checked' : ''}`}
-                          onClick={() => {
-                            if (!task.completed) {
-                              sounds.playSuccess()
-                              onTriggerState('remind', 5000)
-                            } else {
-                              sounds.playClick()
-                            }
-                            onToggleTask(task.id)
-                          }}
-                        >
-                          {task.completed ? '✓' : ''}
-                        </div>
-                        <span className="task-text">{task.text}</span>
-                        {!task.completed && (
-                          <span
-                            style={{
-                              fontSize: '9px',
-                              padding: '2px 6px',
-                              background: '#17253b',
-                              border: '1px solid #2b4c7e',
-                              borderRadius: '2px',
-                              color: 'var(--spirit-cyan)',
-                              flexShrink: 0
-                            }}
-                          >
-                            ⏰ {task.reminderMinutes || settings.taskReminderMinutes || 35}m
-                          </span>
-                        )}
-                        {task.category === 'future' && (
-                          <span
-                            style={{
-                              fontSize: '9px',
-                              padding: '2px 6px',
-                              background: '#1e293b',
-                              borderRadius: '2px',
-                              color: 'var(--text-muted)'
-                            }}
-                          >
-                            LATER
-                          </span>
-                        )}
-                      </div>
-                      <button
-                        className="task-del-btn"
-                        onClick={() => {
-                          sounds.playClick()
-                          onDeleteTask(task.id)
-                        }}
-                        title="Delete task"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  fontSize: '10px',
-                  color: 'var(--text-dim)',
-                  borderTop: '1px solid var(--pixel-border)',
-                  paddingTop: '10px'
-                }}
-              >
-                <span>COMPLETED: {completedCount} / {tasks.length}</span>
-                <button
-                  className="pixel-btn secondary"
-                  style={{ fontSize: '9px', padding: '4px 8px' }}
-                  onClick={() => {
-                    sounds.playPop()
-                    onTriggerState('remind', 6000)
-                  }}
-                >
-                  🐾 HOLD CHECKLIST
-                </button>
-              </div>
             </div>
           )}
 
           {/* ── POMODORO TAB ─────────────────────── */}
           {activeTab === 'pomodoro' && (
             <div className="pomo-container">
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  className={`pixel-btn ${pomoMode === 'focus' ? '' : 'secondary'}`}
-                  onClick={() => resetPomo('focus')}
-                >
-                  FOCUS ({settings.pomodoro.focusMinutes}m)
-                </button>
-                <button
-                  className={`pixel-btn ${pomoMode === 'shortBreak' ? '' : 'secondary'}`}
-                  onClick={() => resetPomo('shortBreak')}
-                >
-                  SHORT ({settings.pomodoro.shortBreakMinutes}m)
-                </button>
-                <button
-                  className={`pixel-btn ${pomoMode === 'longBreak' ? '' : 'secondary'}`}
-                  onClick={() => resetPomo('longBreak')}
-                >
-                  REST ({settings.pomodoro.longBreakMinutes}m)
-                </button>
+              <div className="pomo-display" aria-live="polite">
+                {formatPomoTime(pomoTimeLeft)}
               </div>
 
-              <div className="pomo-display">{formatPomoTime(pomoTimeLeft)}</div>
+              <div className="pomo-progress-track">
+                <div className="pomo-progress-fill" style={{ width: `${pomoProgressPct}%` }} />
+              </div>
 
-              <div className="pomo-status">
-                {pomoMode === 'focus'
-                  ? `⚡ FOCUS SESSION • CYCLE #${pomoCycles + 1}`
-                  : `☕ BREAK TIME • SLEEP & RECHARGE`}
+              <div className="pomo-meta-row">
+                <span>{pomoMode === 'focus' ? 'SESSION PROGRESS' : 'BREAK PROGRESS'}</span>
+                <span>SESSIONS {pomoCycles % 4}/4</span>
               </div>
 
               <div className="pomo-controls">
-                <button
-                  className="pixel-btn"
-                  style={{ minWidth: '120px', justifyContent: 'center' }}
-                  onClick={togglePomoRunning}
-                >
-                  {pomoIsRunning ? '⏸ PAUSE' : '▶ START'}
+                <button type="button" className="paper-btn-dark" onClick={togglePomoRunning}>
+                  {pomoIsRunning ? 'PAUSE' : pomoMode === 'focus' ? 'FOCUS' : 'START BREAK'}
                 </button>
                 <button
-                  className="pixel-btn secondary"
+                  type="button"
+                  className="paper-btn-square"
                   onClick={() => resetPomo(pomoMode)}
+                  title="Reset timer"
+                  aria-label="Reset timer"
                 >
-                  ↺ RESET
+                  ↺
                 </button>
               </div>
-            </div>
-          )}
 
-          {/* ── GOALS TAB ────────────────────────── */}
-          {activeTab === 'goals' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
-                <div className="settings-label">🌟 MAIN FOCUS GOAL TODAY</div>
-                <input
-                  type="text"
-                  className="pixel-input"
-                  style={{ width: '100%' }}
-                  placeholder="e.g. Finish Core Engine Architecture"
-                  value={dailyGoal.title}
-                  onChange={(e) => onUpdateDailyGoal({ title: e.target.value })}
-                />
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
-                  <div
-                    className={`pixel-checkbox ${dailyGoal.completed ? 'checked' : ''}`}
-                    onClick={() => {
-                      if (!dailyGoal.completed) {
-                        sounds.playSuccess()
-                        onTriggerState('remind', 6000)
-                      }
-                      onUpdateDailyGoal({ completed: !dailyGoal.completed })
-                    }}
-                  >
-                    {dailyGoal.completed ? '✓' : ''}
-                  </div>
-                  <span style={{ fontSize: '11px', color: dailyGoal.completed ? 'var(--spirit-cyan)' : 'var(--text-white)' }}>
-                    {dailyGoal.completed ? 'GOAL ACCOMPLISHED! 🎉' : 'Mark Goal Completed'}
-                  </span>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <span className="settings-label">💧 DAILY HEALTH CHECK-INS</span>
-                <div className="settings-row">
-                  <div>
-                    <div className="settings-label">Hydration reminder</div>
-                    <div className="settings-desc">Prompt every 45 mins</div>
-                  </div>
-                  <button
-                    className="pixel-btn secondary"
-                    style={{ fontSize: '9px' }}
-                    onClick={() => {
-                      sounds.playPop()
-                      onTriggerState('remind', 5000)
-                    }}
-                  >
-                    💧 DRINK WATER
-                  </button>
-                </div>
-                <div className="settings-row">
-                  <div>
-                    <div className="settings-label">Screen & Eye rest</div>
-                    <div className="settings-desc">20-20-20 rule reminder</div>
-                  </div>
-                  <button
-                    className="pixel-btn secondary"
-                    style={{ fontSize: '9px' }}
-                    onClick={() => {
-                      sounds.playPop()
-                      onTriggerState('sleep', 6000)
-                    }}
-                  >
-                    👁 TAKE A NAP
-                  </button>
-                </div>
+              <div style={{ display: 'flex', gap: '16px', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  className="paper-link-btn"
+                  style={{ color: 'var(--ink-muted)' }}
+                  onClick={() => resetPomo(pomoMode === 'focus' ? 'shortBreak' : 'focus')}
+                >
+                  {pomoMode === 'focus' ? 'TAKE A SHORT BREAK' : 'BACK TO FOCUS'}
+                </button>
+                <button
+                  type="button"
+                  className="paper-link-btn"
+                  style={{ color: 'var(--spirit-cyan)' }}
+                  onClick={() => {
+                    onClose()
+                    onStartBreathing()
+                  }}
+                >
+                  BREATHING MEDITATION
+                </button>
               </div>
             </div>
           )}
@@ -505,23 +646,16 @@ export const PixelModal: React.FC<PixelModalProps> = ({
           {/* ── STATES LAB TAB ───────────────────── */}
           {activeTab === 'states' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ borderBottom: '1px solid var(--pixel-border)', paddingBottom: '8px' }}>
-                <div className="settings-label" style={{ color: 'var(--spirit-cyan)' }}>
-                  🧪 COMPANION STATE GALLERY & TESTING LAB
-                </div>
-                <div className="settings-desc">
-                  Live interactive preview of all 7 pixelated states. Click any state to activate it on your desktop!
-                </div>
+              <div>
+                <div className="settings-label">Companion Animations</div>
+                <div className="settings-desc">Preview any of Ash&apos;s 7 states on your desktop.</div>
               </div>
 
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-                  gap: '12px',
-                  maxHeight: '380px',
-                  overflowY: 'auto',
-                  paddingRight: '4px'
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                  gap: '12px'
                 }}
               >
                 {ALL_STATES.map((st) => (
@@ -533,56 +667,44 @@ export const PixelModal: React.FC<PixelModalProps> = ({
                       alignItems: 'center',
                       textAlign: 'center',
                       gap: '10px',
-                      padding: '16px 12px'
+                      padding: '14px'
                     }}
                   >
-                    {/* Live mini pixel preview */}
                     <div
                       style={{
-                        background: '#090b10',
-                        border: '2px solid var(--pixel-border)',
-                        borderRadius: '4px',
-                        padding: '10px',
+                        background: '#161b26',
+                        borderRadius: '6px',
+                        padding: '8px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        minHeight: '110px',
+                        minHeight: '100px',
                         width: '100%'
                       }}
                     >
-                      <CompanionSprite state={st.id} scale={126} />
+                      <CompanionSprite state={st.id} scale={118} />
                     </div>
 
                     <div>
-                      <div className="settings-label" style={{ color: 'var(--spirit-cyan)', fontSize: '11px' }}>
-                        {st.label} ({st.name})
-                      </div>
-                      <div className="settings-desc" style={{ marginTop: '4px', lineHeight: '1.4' }}>
+                      <div className="settings-label">{st.name}</div>
+                      <div className="settings-desc" style={{ marginTop: '3px' }}>
                         {st.description}
                       </div>
-                      <div
-                        style={{
-                          fontSize: '9px',
-                          color: '#64748b',
-                          marginTop: '4px',
-                          background: 'rgba(0,0,0,0.3)',
-                          padding: '2px 6px',
-                          borderRadius: '2px'
-                        }}
-                      >
-                        ⚡ {st.trigger}
+                      <div style={{ fontSize: '11px', color: 'var(--ink-muted)', marginTop: '4px' }}>
+                        {st.trigger}
                       </div>
                     </div>
 
                     <button
-                      className="pixel-btn"
-                      style={{ fontSize: '9px', width: '100%', justifyContent: 'center' }}
+                      type="button"
+                      className="paper-btn-ghost"
+                      style={{ width: '100%' }}
                       onClick={() => {
                         sounds.playSuccess()
                         onTriggerState(st.id, 12000)
                       }}
                     >
-                      ▶ TEST ON DESKTOP
+                      Test on Desktop
                     </button>
                   </div>
                 ))}
@@ -595,10 +717,98 @@ export const PixelModal: React.FC<PixelModalProps> = ({
             <div className="settings-group">
               <div className="settings-row">
                 <div>
-                  <div className="settings-label">Companion Size</div>
-                  <div className="settings-desc">Balanced pixel scale on desktop (M = 165px default)</div>
+                  <div className="settings-label">Water Reminder</div>
+                  <div className="settings-desc">Hydration nudge every {settings.waterIntervalMinutes || 45}m</div>
                 </div>
-                <div style={{ display: 'flex', gap: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div className="paper-pill-group">
+                    {[30, 45, 60].map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        className={`paper-pill ${(settings.waterIntervalMinutes || 45) === m ? 'active' : ''}`}
+                        onClick={() => onUpdateSettings({ waterIntervalMinutes: m })}
+                      >
+                        {m}m
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className={`paper-pill ${settings.waterReminderEnabled ? 'active' : ''}`}
+                    style={{ border: '1px solid var(--paper-border-strong)', padding: '5px 10px' }}
+                    onClick={() => {
+                      sounds.playClick()
+                      onUpdateSettings({ waterReminderEnabled: !settings.waterReminderEnabled })
+                    }}
+                  >
+                    {settings.waterReminderEnabled ? 'On' : 'Off'}
+                  </button>
+                  <button
+                    type="button"
+                    className="paper-btn-ghost"
+                    onClick={onTestWaterReminder}
+                  >
+                    Test
+                  </button>
+                </div>
+              </div>
+
+              <div className="settings-row">
+                <div>
+                  <div className="settings-label">Eye &amp; Screen Rest (Sleep Break)</div>
+                  <div className="settings-desc">Breathing meditation &amp; ambient sounds every {settings.eyeRestIntervalMinutes || 45}m</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div className="paper-pill-group">
+                    {[20, 45, 50].map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        className={`paper-pill ${(settings.eyeRestIntervalMinutes || 45) === m ? 'active' : ''}`}
+                        onClick={() => onUpdateSettings({ eyeRestIntervalMinutes: m })}
+                      >
+                        {m}m
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className={`paper-pill ${settings.eyeRestEnabled ? 'active' : ''}`}
+                    style={{ border: '1px solid var(--paper-border-strong)', padding: '5px 10px' }}
+                    onClick={() => {
+                      sounds.playClick()
+                      onUpdateSettings({ eyeRestEnabled: !settings.eyeRestEnabled })
+                    }}
+                  >
+                    {settings.eyeRestEnabled ? 'On' : 'Off'}
+                  </button>
+                  <button
+                    type="button"
+                    className="paper-btn-ghost"
+                    onClick={onTestEyeRestReminder}
+                  >
+                    Test
+                  </button>
+                  <button
+                    type="button"
+                    className="paper-btn-ghost"
+                    onClick={() => {
+                      onClose()
+                      onStartBreathing()
+                    }}
+                  >
+                    Breathe
+                  </button>
+                </div>
+              </div>
+
+              <div className="settings-row">
+                <div>
+                  <div className="settings-label">Companion Size</div>
+                  <div className="settings-desc">Display size on your desktop</div>
+                </div>
+                <div className="paper-pill-group">
                   {[
                     { label: 'S', value: 136 },
                     { label: 'M', value: 165 },
@@ -607,8 +817,8 @@ export const PixelModal: React.FC<PixelModalProps> = ({
                   ].map((sz) => (
                     <button
                       key={sz.value}
-                      className={`pixel-btn ${settings.petScale === sz.value ? '' : 'secondary'}`}
-                      style={{ fontSize: '9px', padding: '5px 10px' }}
+                      type="button"
+                      className={`paper-pill ${settings.petScale === sz.value ? 'active' : ''}`}
                       onClick={() => {
                         sounds.playClick()
                         onUpdateSettings({ petScale: sz.value })
@@ -622,21 +832,57 @@ export const PixelModal: React.FC<PixelModalProps> = ({
 
               <div className="settings-row">
                 <div>
-                  <div className="settings-label">Task Reminder Schedule</div>
-                  <div className="settings-desc">Remind after 35–40m → Angry (+10m) → Sad (+20m)</div>
+                  <div className="settings-label">Timing Pace Mode</div>
+                  <div className="settings-desc">
+                    {settings.fastDemoMode
+                      ? 'Demo: Sleep 30s • Remind 20s → Angry 35s → Sad 50s'
+                      : 'Normal: Sleep 3m • Remind 35–40m → Angry +10m → Sad +20m'}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  {[20, 30, 35, 40, 60].map((mins) => (
+                <button
+                  type="button"
+                  className="paper-btn-ghost"
+                  onClick={() => {
+                    sounds.playClick()
+                    onUpdateSettings({ fastDemoMode: !settings.fastDemoMode })
+                  }}
+                >
+                  {settings.fastDemoMode ? 'Fast Demo' : 'Realistic'}
+                </button>
+              </div>
+
+              <div className="settings-row">
+                <div>
+                  <div className="settings-label">Auto-Roam &amp; Sleep</div>
+                  <div className="settings-desc">Calm floor walks and sleeping after 3 min idle</div>
+                </div>
+                <button
+                  type="button"
+                  className="paper-btn-ghost"
+                  onClick={() => {
+                    sounds.playClick()
+                    onUpdateSettings({ roamingEnabled: !settings.roamingEnabled })
+                  }}
+                >
+                  {settings.roamingEnabled ? 'Enabled' : 'Disabled'}
+                </button>
+              </div>
+
+              <div className="settings-row">
+                <div>
+                  <div className="settings-label">Typing Avoidance</div>
+                  <div className="settings-desc">Fly to a top corner while you are typing</div>
+                </div>
+                <div className="paper-pill-group">
+                  {(['high', 'normal', 'low', 'off'] as const).map((lvl) => (
                     <button
-                      key={mins}
-                      className={`pixel-btn ${(settings.taskReminderMinutes || 35) === mins ? '' : 'secondary'}`}
-                      style={{ fontSize: '9px', padding: '5px 8px' }}
-                      onClick={() => {
-                        sounds.playClick()
-                        onUpdateSettings({ taskReminderMinutes: mins })
-                      }}
+                      key={lvl}
+                      type="button"
+                      className={`paper-pill ${settings.typingAvoidance === lvl ? 'active' : ''}`}
+                      style={{ textTransform: 'capitalize' }}
+                      onClick={() => onUpdateSettings({ typingAvoidance: lvl })}
                     >
-                      {mins}m
+                      {lvl}
                     </button>
                   ))}
                 </div>
@@ -644,72 +890,12 @@ export const PixelModal: React.FC<PixelModalProps> = ({
 
               <div className="settings-row">
                 <div>
-                  <div className="settings-label">Timing Pace Mode</div>
-                  <div className="settings-desc">
-                    {settings.fastDemoMode
-                      ? 'Fast Demo: Sleep 30s • Remind 20s → Angry 35s → Sad 50s'
-                      : 'Normal: Idle 45–60s • Sleep 3m • Remind 35–40m'}
-                  </div>
+                  <div className="settings-label">Sound Effects</div>
+                  <div className="settings-desc">Retro chimes for tasks and alerts</div>
                 </div>
                 <button
-                  className={`pixel-btn ${settings.fastDemoMode ? '' : 'secondary'}`}
-                  style={{ fontSize: '9px' }}
-                  onClick={() => {
-                    sounds.playClick()
-                    onUpdateSettings({ fastDemoMode: !settings.fastDemoMode })
-                  }}
-                >
-                  {settings.fastDemoMode ? '⚡ FAST DEMO (SEC)' : '🕒 REALISTIC (35-40M)'}
-                </button>
-              </div>
-
-              <div className="settings-row">
-                <div>
-                  <div className="settings-label">Auto-Roam & Slow Stroll</div>
-                  <div className="settings-desc">Calm horizontal floor walking & 3-min undisturbed sleep</div>
-                </div>
-                <button
-                  className={`pixel-btn ${settings.roamingEnabled ? '' : 'secondary'}`}
-                  style={{ fontSize: '9px' }}
-                  onClick={() => {
-                    sounds.playClick()
-                    onUpdateSettings({ roamingEnabled: !settings.roamingEnabled })
-                  }}
-                >
-                  {settings.roamingEnabled ? 'ENABLED' : 'DISABLED'}
-                </button>
-              </div>
-
-              <div className="settings-row">
-                <div>
-                  <div className="settings-label">Typing Avoidance (Fly to Top Corner)</div>
-                  <div className="settings-desc">Flies diagonally to top corner when you type</div>
-                </div>
-                <select
-                  value={settings.typingAvoidance}
-                  onChange={(e) =>
-                    onUpdateSettings({
-                      typingAvoidance: e.target.value as CompanionSettings['typingAvoidance']
-                    })
-                  }
-                  className="pixel-input"
-                  style={{ width: '110px' }}
-                >
-                  <option value="high">High</option>
-                  <option value="normal">Normal</option>
-                  <option value="low">Low</option>
-                  <option value="off">Off</option>
-                </select>
-              </div>
-
-              <div className="settings-row">
-                <div>
-                  <div className="settings-label">8-Bit Sound Effects</div>
-                  <div className="settings-desc">Retro chimes for tasks & timer</div>
-                </div>
-                <button
-                  className={`pixel-btn ${settings.soundEnabled ? '' : 'secondary'}`}
-                  style={{ fontSize: '9px' }}
+                  type="button"
+                  className="paper-btn-ghost"
                   onClick={() => {
                     const next = !settings.soundEnabled
                     sounds.setEnabled(next)
@@ -717,69 +903,111 @@ export const PixelModal: React.FC<PixelModalProps> = ({
                     onUpdateSettings({ soundEnabled: next })
                   }}
                 >
-                  {settings.soundEnabled ? 'ON' : 'MUTED'}
+                  {settings.soundEnabled ? 'On' : 'Muted'}
                 </button>
               </div>
 
-              {/* Movement Test Triggers */}
               <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
                 <div>
-                  <div className="settings-label">Movement Actions & Tests</div>
-                  <div className="settings-desc">Manually trigger walking, flying, or roaming now</div>
+                  <div className="settings-label">Quick Movement Actions</div>
+                  <div className="settings-desc">Test walking, roaming, or flying to a corner</div>
                 </div>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', width: '100%' }}>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <button
-                    className="pixel-btn"
-                    style={{ fontSize: '9px' }}
+                    type="button"
+                    className="paper-btn-ghost"
                     onClick={() => {
                       sounds.playClick()
                       onWalkAcrossFloor()
                     }}
                   >
-                    🐾 WALK ON FLOOR
+                    Walk on Floor
                   </button>
                   <button
-                    className="pixel-btn secondary"
-                    style={{ fontSize: '9px' }}
+                    type="button"
+                    className="paper-btn-ghost"
                     onClick={() => {
                       sounds.playPop()
                       onTriggerRoamNow()
                     }}
                   >
-                    ✨ TRIGGER AUTO-ROAM
+                    Trigger Roam
                   </button>
                   <button
-                    className="pixel-btn secondary"
-                    style={{ fontSize: '9px' }}
+                    type="button"
+                    className="paper-btn-ghost"
                     onClick={() => {
                       sounds.playClick()
                       onFlyToSafeZone()
                     }}
                   >
-                    🚀 FLY TO CORNER
+                    Fly to Corner
                   </button>
                 </div>
               </div>
 
-              <div className="settings-row" style={{ borderTop: '2px solid #3d1c24' }}>
+              <div className="settings-row">
+                <div>
+                  <div className="settings-label">Video Demo Data</div>
+                  <div className="settings-desc">Load designer tasks + 45s Water → +30s Breathing</div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="paper-btn-ghost"
+                    onClick={() => {
+                      sounds.playSuccess()
+                      onLoadVideoDemo()
+                    }}
+                  >
+                    Load Demo
+                  </button>
+                  <button
+                    type="button"
+                    className="paper-btn-ghost"
+                    onClick={() => {
+                      sounds.playClick()
+                      onClearDemoData()
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              <div className="settings-row">
+                <div>
+                  <div className="settings-label">Your Name &amp; Setup</div>
+                  <div className="settings-desc">
+                    {settings.userName ? `Signed in as ${settings.userName}` : 'Personalize Ash with your name & rhythm'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="paper-btn-ghost"
+                  onClick={() => {
+                    sounds.playClick()
+                    onReplayOnboarding()
+                  }}
+                >
+                  Run Setup
+                </button>
+              </div>
+
+              <div className="settings-row">
                 <div>
                   <div className="settings-label" style={{ color: 'var(--pixel-red)' }}>
                     Quit Application
                   </div>
-                  <div className="settings-desc">Close desktop companion</div>
+                  <div className="settings-desc">Close Ash desktop companion</div>
                 </div>
                 <button
-                  className="pixel-btn"
-                  style={{
-                    background: '#ef4444',
-                    borderColor: '#b91c1c',
-                    boxShadow: '0 3px 0 #7f1d1d',
-                    color: '#fff',
-                    fontSize: '9px'
-                  }}
+                  type="button"
+                  className="paper-btn-ghost"
+                  style={{ borderColor: '#fca5a5', color: 'var(--pixel-red)' }}
                   onClick={() => window.electronAPI?.quitApp()}
                 >
-                  QUIT
+                  Quit
                 </button>
               </div>
             </div>

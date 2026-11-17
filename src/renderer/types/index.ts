@@ -26,12 +26,18 @@ export interface PomodoroSettings {
 }
 
 export interface CompanionSettings {
+  userName: string
+  onboardingCompleted: boolean
   soundEnabled: boolean
   roamingEnabled: boolean
   roamIntervalSeconds: number
   typingAvoidance: 'high' | 'normal' | 'low' | 'off'
   bubbleFrequencyMinutes: number
   taskReminderMinutes: number // Default 35 or 40 minutes
+  waterReminderEnabled: boolean
+  waterIntervalMinutes: number // e.g., 30, 45, 60
+  eyeRestEnabled: boolean
+  eyeRestIntervalMinutes: number // e.g., 20, 45, 50
   fastDemoMode: boolean // Allows testing the full sleep/remind/angry/sad lifecycle in seconds
   showSpeechBubble: boolean // Keep speech bubble attached above Ash
   petScale: number // 136, 165, 204, 238
@@ -44,4 +50,5 @@ export interface BubbleMessage {
   type: 'task' | 'pomodoro' | 'habit' | 'chatter'
   actionLabel?: string
   actionData?: string
+  showYesNo?: boolean
 }
