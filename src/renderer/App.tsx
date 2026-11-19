@@ -84,7 +84,6 @@ export default function App(): JSX.Element {
       const saved = localStorage.getItem('desktop_agent_settings')
       if (!saved) return DEFAULT_SETTINGS
       const parsed = JSON.parse(saved)
-      // Migrate oversized 238px default down to 165px so Ash is slightly bigger than v1 and smaller than 238
       const migratedScale =
         !parsed.petScale || parsed.petScale === 238 || parsed.petScale < 120 ? 165 : parsed.petScale
       return {
@@ -92,7 +91,9 @@ export default function App(): JSX.Element {
         ...parsed,
         petScale: migratedScale,
         taskReminderMinutes: parsed.taskReminderMinutes || 35,
-        fastDemoMode: parsed.fastDemoMode ?? false,
+        waterReminderEnabled: parsed.waterReminderEnabled ?? true,
+        eyeRestEnabled: parsed.eyeRestEnabled ?? true,
+        fastDemoMode: false,
         showSpeechBubble: parsed.showSpeechBubble ?? true
       }
     } catch {
@@ -130,9 +131,11 @@ export default function App(): JSX.Element {
     t: 0
   })
 
+  // Track session start time so persisted tasks from previous sessions never start off already crying/overdue on launch!
+  const sessionStartedAtRef = useRef<number>(Date.now())
   // Track user interaction with Ash for the 3-minute undisturbed sleep rule
   const lastInteractionAtRef = useRef<number>(Date.now())
-  // Track task neglect escalation stage so we don't spam sounds every second
+  // Track task neglect escalation stage so each stage fires at most ONCE
   const neglectStageRef = useRef<'none' | 'remind' | 'angry' | 'sad'>('none')
 
   // Dragging refs
@@ -144,6 +147,8 @@ export default function App(): JSX.Element {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isAshHidden, setIsAshHidden] = useState(false)
   const [isBubbleVisible, setIsBubbleVisible] = useState(true)
+  const isBubbleVisibleRef = useRef(true)
+  isBubbleVisibleRef.current = isBubbleVisible
   const bubbleHideTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const getTimeGreeting = useCallback((name?: string) => {
@@ -155,15 +160,17 @@ export default function App(): JSX.Element {
 
   const showBubbleForOneMinute = useCallback(() => {
     setIsBubbleVisible(true)
+    isBubbleVisibleRef.current = true
     if (bubbleHideTimerRef.current) {
       clearTimeout(bubbleHideTimerRef.current)
     }
     bubbleHideTimerRef.current = setTimeout(() => {
       setIsBubbleVisible(false)
-    }, 12000) // Type out and disappear cleanly after 12 seconds
+      isBubbleVisibleRef.current = false
+    }, 10000) // Type out and disappear cleanly after 10 seconds
   }, [])
 
-  // Start the initial 12s bubble timer + warm time-of-day greeting on launch
+  // Start the initial 10s bubble timer + warm time-of-day greeting on launch
   useEffect(() => {
     if (settings.onboardingCompleted) {
       setCustomStatusText(getTimeGreeting(settings.userName))
@@ -318,14 +325,8 @@ export default function App(): JSX.Element {
         p.manualLockUntil = performance.now() + baseDur * 1000
       }
       setSpriteState(nextState)
-      if (customMsg !== undefined) {
+      if (typeof customMsg === 'string' && customMsg.length > 0) {
         setCustomStatusText(customMsg)
-        if (customMsg !== null) {
-          showBubbleForOneMinute()
-        }
-      } else if (nextState === 'idle' || nextState === 'walk') {
-        setCustomStatusText(null)
-      } else if (nextState === 'remind' || nextState === 'angry' || nextState === 'sad' || nextState === 'sleep') {
         showBubbleForOneMinute()
       }
     },
@@ -341,6 +342,11 @@ export default function App(): JSX.Element {
     // If Ash is currently in a neglect alert (remind/angry/sad) or sleeping from inactivity, keep that state!
     if (neglectStageRef.current !== 'none') return
     if (p.st === 'sleep') return
+    // Parked in a corner while the user is working: just rest, don't wander back out
+    if (p.isPerchedInCorner) {
+      applyState('idle', settings.fastDemoMode ? 12 : 48, false, null)
+      return
+    }
 
     const minX = 36
     const maxX = Math.max(minX + 60, screenSize.width - settings.petScale - 36)
@@ -379,60 +385,71 @@ export default function App(): JSX.Element {
       const p = physRef.current
 
       // 1. Check active incomplete tasks for Reminder -> Angry -> Sad escalation
+      // Never interrupt an active bubble or Water/Breathing Yes/No prompt so text NEVER overlaps!
+      if (pendingWellnessActionRef.current !== null || isBubbleVisibleRef.current) return
+
       const pendingTasks = tasks.filter((t) => !t.completed)
       if (pendingTasks.length > 0) {
-        // Focus on the most urgent / oldest pending task
+        // Measure from sessionStartedAtRef so persisted tasks never start off crying on launch!
         const activeTask = pendingTasks[pendingTasks.length - 1]
-        const elapsedMs = now - activeTask.createdAt
+        const taskStart = Math.max(activeTask.createdAt, sessionStartedAtRef.current)
+        const elapsedMs = now - taskStart
+        const tooMany = pendingTasks.length > 2
 
         const remMins = activeTask.reminderMinutes || settings.taskReminderMinutes || 35
-        const remindThresholdMs = settings.fastDemoMode ? 20 * 1000 : remMins * 60 * 1000
+        const remindThresholdMs = settings.fastDemoMode ? 90 * 1000 : remMins * 60 * 1000
         const angryThresholdMs = settings.fastDemoMode
-          ? remindThresholdMs + 15 * 1000
+          ? remindThresholdMs + 30 * 1000
           : remindThresholdMs + 10 * 60 * 1000
         const sadThresholdMs = settings.fastDemoMode
-          ? remindThresholdMs + 30 * 1000
+          ? remindThresholdMs + 60 * 1000
           : remindThresholdMs + 20 * 60 * 1000
 
         if (elapsedMs >= sadThresholdMs) {
-          if (neglectStageRef.current !== 'sad' || p.st !== 'sad') {
+          if (neglectStageRef.current !== 'sad') {
             neglectStageRef.current = 'sad'
             p.tgtX = null
             p.tgtY = null
             sounds.playAlert()
             applyState(
               'sad',
-              60,
+              30,
               true,
-              `😢 You still haven't done "${activeTask.text}"... I'm getting sad!`
+              tooMany
+                ? `😢 You still have ${pendingTasks.length} tasks pending... I'm getting sad!`
+                : `😢 You still haven't done "${activeTask.text}"... I'm getting sad!`
             )
           }
           return
         } else if (elapsedMs >= angryThresholdMs) {
-          if (neglectStageRef.current !== 'angry' || p.st !== 'angry') {
+          if (neglectStageRef.current !== 'angry') {
             neglectStageRef.current = 'angry'
             p.tgtX = null
             p.tgtY = null
             sounds.playAlert()
             applyState(
               'angry',
-              60,
+              25,
               true,
-              `🔥 Welcome! You are not doing "${activeTask.text}" for a long time!`
+              tooMany
+                ? `🔥 You have too many tasks pending (${pendingTasks.length}) and haven't started!`
+                : `🔥 Hey! You are not doing "${activeTask.text}" for a long time!`
             )
           }
           return
         } else if (elapsedMs >= remindThresholdMs) {
-          if (neglectStageRef.current !== 'remind' || p.st !== 'remind') {
+          if (neglectStageRef.current !== 'remind') {
             neglectStageRef.current = 'remind'
             p.tgtX = null
             p.tgtY = null
             sounds.playPop()
             applyState(
               'remind',
-              60,
+              20,
               true,
-              `⏰ Reminder (${remMins}m): Time to complete "${activeTask.text}"!`
+              tooMany
+                ? `⏰ You have too many tasks pending (${pendingTasks.length})! Let's knock one out.`
+                : `⏰ Reminder (${remMins}m): Time to complete "${activeTask.text}"!`
             )
           }
           return
@@ -450,14 +467,11 @@ export default function App(): JSX.Element {
         }
       }
 
-      // 2. If perched in top corner from typing avoidance, fly diagonally back to floor after 25s of no typing
-      if (p.isPerchedInCorner && p.lastTypingAt > 0 && now - p.lastTypingAt > 25000) {
+      // 2. Ash stays parked in its corner after typing — no automatic glide back (prevents ping-pong).
+      //    Only release the park after 5 minutes of no typing so calm roaming can resume.
+      if (p.isPerchedInCorner && p.lastTypingAt > 0 && now - p.lastTypingAt > 5 * 60 * 1000) {
         p.isPerchedInCorner = false
-        const returnX = Math.max(50, Math.min(screenSize.width - settings.petScale - 50, p.px + (p.dir * 90)))
-        p.tgtX = returnX
-        p.tgtY = floorY
-        applyState('fly', 5.0, true, '🕊️ Done typing? Gliding back down to the floor!')
-        return
+        p.lastTypingAt = 0
       }
 
       // 3. Undisturbed Sleep Rule:
@@ -505,74 +519,85 @@ export default function App(): JSX.Element {
     applyState('remind', 15, true, `👁️ ${who} for a breathing & eye rest break. Ready?`)
   }, [applyState, settings.userName])
 
+  const closeBubbleImmediately = useCallback(() => {
+    if (bubbleHideTimerRef.current) {
+      clearTimeout(bubbleHideTimerRef.current)
+      bubbleHideTimerRef.current = null
+    }
+    isBubbleVisibleRef.current = false
+    setIsBubbleVisible(false)
+    setCustomStatusText(null)
+    setWellnessPrompt(null)
+    pendingWellnessActionRef.current = null
+  }, [])
+
   const handleWellnessYes = useCallback(() => {
     const kind = wellnessPrompt || pendingWellnessActionRef.current
-    pendingWellnessActionRef.current = null
-    setWellnessPrompt(null)
+    closeBubbleImmediately()
     lastInteractionAtRef.current = Date.now()
 
     if (kind === 'breathing') {
       sounds.playClick()
       lastEyeRestAtRef.current = Date.now()
-      setIsBubbleVisible(false)
       setIsBreathingOpen(true)
     } else {
       sounds.playSuccess()
       lastWaterAtRef.current = Date.now()
       if (settings.fastDemoMode) {
-        // In Fast Demo Mode, trigger Eye Rest / Breathing 30 seconds after Water!
-        lastEyeRestAtRef.current = Date.now() - 45 * 1000
+        // Trigger Eye Rest / Breathing 18 seconds after answering Water!
+        lastEyeRestAtRef.current = Date.now() - (38 - 18) * 1000
       }
-      applyState('remind', 4, true, '💧 Awesome! Stay hydrated!')
+      applyState('idle', 48, false)
     }
-  }, [wellnessPrompt, applyState])
+  }, [wellnessPrompt, settings.fastDemoMode, closeBubbleImmediately, applyState])
 
   const handleWellnessNo = useCallback(() => {
     const kind = wellnessPrompt || pendingWellnessActionRef.current
-    pendingWellnessActionRef.current = null
-    setWellnessPrompt(null)
+    closeBubbleImmediately()
     lastInteractionAtRef.current = Date.now()
     sounds.playClick()
 
     const snoozeMs = settings.fastDemoMode ? 15 * 1000 : 5 * 60 * 1000
     if (kind === 'breathing') {
-      const eyeIntervalMs = settings.fastDemoMode ? 42 * 1000 : (settings.eyeRestIntervalMinutes || 45) * 60 * 1000
+      const eyeIntervalMs = settings.fastDemoMode ? 38 * 1000 : (settings.eyeRestIntervalMinutes || 45) * 60 * 1000
       lastEyeRestAtRef.current = Date.now() - eyeIntervalMs + snoozeMs
-      applyState('idle', 4, false, '👁️ Snoozed for 5 minutes!')
     } else {
-      const waterIntervalMs = settings.fastDemoMode ? 25 * 1000 : (settings.waterIntervalMinutes || 45) * 60 * 1000
+      const waterIntervalMs = settings.fastDemoMode ? 20 * 1000 : (settings.waterIntervalMinutes || 45) * 60 * 1000
       lastWaterAtRef.current = Date.now() - waterIntervalMs + snoozeMs
-      applyState('idle', 4, false, '💧 Snoozed for 5 minutes!')
     }
+    applyState('idle', 48, false)
   }, [
     wellnessPrompt,
     settings.fastDemoMode,
     settings.eyeRestIntervalMinutes,
     settings.waterIntervalMinutes,
+    closeBubbleImmediately,
     applyState
   ])
 
   useEffect(() => {
     const checkWellness = () => {
       if (isModalOpen || isBreathingOpen || isDraggingRef.current) return
+      // Never trigger a new wellness prompt while any bubble or Yes/No prompt is currently visible!
+      if (pendingWellnessActionRef.current !== null || isBubbleVisibleRef.current) return
       const now = Date.now()
       const p = physRef.current
       if (p.st === 'fly') return
 
       if (settings.waterReminderEnabled) {
-        const waterMs = settings.fastDemoMode ? 45 * 1000 : (settings.waterIntervalMinutes || 45) * 60 * 1000
+        const waterMs = settings.fastDemoMode ? 20 * 1000 : (settings.waterIntervalMinutes || 45) * 60 * 1000
         if (now - lastWaterAtRef.current >= waterMs) {
           triggerWaterReminder()
-          // Schedule Eye Rest / Breathing 30 seconds after Water in Fast Demo Mode
+          // Schedule Eye Rest / Breathing 18 seconds after Water in Fast Demo Mode
           if (settings.fastDemoMode) {
-            lastEyeRestAtRef.current = now - (45 * 1000) + (30 * 1000)
+            lastEyeRestAtRef.current = now - (38 - 18) * 1000
           }
           return
         }
       }
 
       if (settings.eyeRestEnabled) {
-        const eyeMs = settings.fastDemoMode ? 75 * 1000 : (settings.eyeRestIntervalMinutes || 45) * 60 * 1000
+        const eyeMs = settings.fastDemoMode ? 38 * 1000 : (settings.eyeRestIntervalMinutes || 45) * 60 * 1000
         if (now - lastEyeRestAtRef.current >= eyeMs) {
           triggerEyeRestReminder()
         }
@@ -635,8 +660,8 @@ export default function App(): JSX.Element {
             }
           }
         } else if (p.st === 'fly') {
-          // Smooth diagonal / aerial flight to target (x, y) corner or edge
-          const flySpeed = 78
+          // Brisk, smooth diagonal / aerial flight to target (x, y) corner or edge
+          const flySpeed = 190
           const targetX = p.tgtX ?? p.px
           const targetY = p.tgtY ?? floorY
           const curY = p.customY ?? floorY
@@ -659,7 +684,7 @@ export default function App(): JSX.Element {
               p.tgtY = null
             }
             const idleDur = settings.fastDemoMode ? 12 : 48
-            applyState('idle', idleDur, false, p.isPerchedInCorner ? '🐾 Perched in the top corner while you type!' : null)
+            applyState('idle', idleDur, false, null)
           } else {
             const vx = (dx / dist) * flySpeed
             const vy = (dy / dist) * flySpeed
@@ -737,7 +762,7 @@ export default function App(): JSX.Element {
     [screenSize.width, settings.petScale, applyState]
   )
 
-  // Fly diagonally to a target spot (e.g. top corner or adjacent edge)
+  // Fly diagonally to a target spot (e.g. corner or adjacent edge) without overwriting existing speech bubbles
   const flyTo = useCallback(
     (targetX: number, targetY?: number, perchInCorner: boolean = false, msg?: string) => {
       if (isDraggingRef.current) return
@@ -750,8 +775,8 @@ export default function App(): JSX.Element {
       p.isPerchedInCorner = perchInCorner
       p.dir = clampedX >= p.px ? 1 : -1
       const dist = Math.hypot(clampedX - p.px, clampedY - p.customY)
-      const durSec = Math.max(3.5, dist / 78 + 1.0)
-      applyState('fly', durSec, true, msg ?? '🕊️ Flying diagonally to a safe spot!')
+      const durSec = Math.max(1.8, dist / 190 + 0.5)
+      applyState('fly', durSec, true, msg)
     },
     [screenSize.width, settings.petScale, floorY, applyState]
   )
@@ -779,17 +804,20 @@ export default function App(): JSX.Element {
     [screenSize.width, settings.petScale, floorY, walkTo, flyTo, applyState]
   )
 
-  // Fly diagonally to whichever top corner is farther from Ash's current x (no cursor dependency)
+  // Move ONCE to the bottom corner farther from Ash (out of the way of browser tabs & content), then stay parked
   const flyToSafeCorner = useCallback(() => {
     const p = physRef.current
-    const leftX = 36
-    const rightX = Math.max(60, screenSize.width - settings.petScale - 36)
-    const targetX = p.px > screenSize.width / 2 ? leftX : rightX
-    const topCornerY = 95
+    const leftX = 24
+    const rightX = Math.max(60, screenSize.width - settings.petScale - 24)
+    const targetX = p.px > screenSize.width / 2 ? rightX : leftX
     p.lastTypingAt = Date.now()
-    sounds.playPop()
-    flyTo(targetX, topCornerY, true, '🕊️ Flying to the top corner while you type! ✨')
-  }, [screenSize.width, settings.petScale, flyTo])
+    // Already tucked into a bottom corner? Stay put.
+    if (Math.abs(p.px - targetX) < 40 && p.customY === null) {
+      p.isPerchedInCorner = true
+      return
+    }
+    flyTo(targetX, floorY, true)
+  }, [screenSize.width, settings.petScale, floorY, flyTo])
 
   const flyToSafeCornerRef = useRef(flyToSafeCorner)
   flyToSafeCornerRef.current = flyToSafeCorner
@@ -975,184 +1003,15 @@ export default function App(): JSX.Element {
     })
   }
 
-  const handleLoadVideoDemo = useCallback(() => {
-    const now = Date.now()
-    lastInteractionAtRef.current = now
-    lastWaterAtRef.current = now
-    lastEyeRestAtRef.current = now
-    neglectStageRef.current = 'none'
-
-    setDailyGoal({
-      id: 'demo-goal',
-      title: 'Polish onboarding & record Ash demo',
-      completed: false
-    })
-    setPreviousGoals(['Finalize warm paper UI tokens'])
-    setTasks([
-      {
-        id: 'demo-1',
-        text: 'Review Figma spacing & typography tokens',
-        completed: false,
-        priority: 'high',
-        category: 'today',
-        createdAt: now,
-        reminderMinutes: 35
-      },
-      {
-        id: 'demo-2',
-        text: 'Sketch mobile header micro-interactions',
-        completed: false,
-        priority: 'medium',
-        category: 'today',
-        createdAt: now,
-        reminderMinutes: 40
-      },
-      {
-        id: 'demo-3',
-        text: 'Reply to client feedback on hero layout',
-        completed: true,
-        priority: 'medium',
-        category: 'today',
-        createdAt: now - 1800000,
-        reminderMinutes: 20
-      },
-      {
-        id: 'demo-4',
-        text: 'Update portfolio case study screenshots',
-        completed: false,
-        priority: 'low',
-        category: 'future',
-        createdAt: now,
-        reminderMinutes: 35
-      },
-      {
-        id: 'demo-5',
-        text: 'Pick up groceries & coffee beans',
-        completed: false,
-        priority: 'low',
-        category: 'future',
-        createdAt: now,
-        reminderMinutes: 30
-      }
-    ])
-    setSettings((prev) => ({
-      ...prev,
-      fastDemoMode: true,
-      waterReminderEnabled: true,
-      eyeRestEnabled: true
-    }))
-    setCustomStatusText('🎬 Demo loaded! Water reminder in 45s, Breathing 30s after.')
-    showBubbleForOneMinute()
-  }, [showBubbleForOneMinute])
-
-  const handleClearDemoData = useCallback(() => {
-    setTasks([])
-    setDailyGoal({ id: '1', title: '', completed: false })
-    setPreviousGoals([])
-    setCustomStatusText(null)
-    neglectStageRef.current = 'none'
-  }, [])
-
-  const handleWalkAcrossFloor = useCallback(() => {
-    setIsModalOpen(false)
-    const p = physRef.current
-    const oppositeX = p.px > screenSize.width / 2 ? 60 : screenSize.width - settings.petScale - 60
-    setTimeout(() => {
-      walkTo(oppositeX)
-    }, 150)
-  }, [screenSize.width, settings.petScale, walkTo])
-
-  const handleTriggerRoamNow = useCallback(() => {
-    setIsModalOpen(false)
-    setTimeout(() => {
-      physRef.current.manualLockUntil = 0
-      neglectStageRef.current = 'none'
-      pickNextCalmRoam()
-    }, 150)
-  }, [pickNextCalmRoam])
-
-  // Compute dynamic persistent speech bubble text that sticks above Ash and changes with Ash's state
-  const pendingTasks = tasks.filter((t) => !t.completed)
-  const activeQuest = pendingTasks[pendingTasks.length - 1]
-
+  // Only display explicit message events in the speech bubble (never switch text mid-display on idle/walk)
   const getDynamicBubbleMessage = (): BubbleMessage | null => {
-    if (isModalOpen || !settings.showSpeechBubble || !isBubbleVisible) return null
+    if (isModalOpen || !settings.showSpeechBubble || !isBubbleVisible || !customStatusText) return null
 
-    if (customStatusText) {
-      return {
-        id: 'status-custom',
-        text: customStatusText,
-        type: 'task',
-        actionLabel: 'OPEN QUESTS',
-        showYesNo: wellnessPrompt !== null
-      }
-    }
-
-    switch (spriteState) {
-      case 'sleep':
-        return {
-          id: 'status-sleep',
-          text: '💤 Zzz... sleeping peacefully. Click me to wake & view quests!',
-          type: 'chatter',
-          actionLabel: 'WAKE & OPEN'
-        }
-      case 'fly':
-        return {
-          id: 'status-fly',
-          text: '🕊️ Flying to a safe spot! Click me anytime for quests.',
-          type: 'chatter',
-          actionLabel: 'OPEN QUESTS'
-        }
-      case 'walk':
-        return {
-          id: 'status-walk',
-          text: activeQuest
-            ? `🐾 Strolling calmly • Quest: "${activeQuest.text}"`
-            : '🐾 Taking a slow stroll along the floor...',
-          type: 'chatter',
-          actionLabel: 'OPEN QUESTS'
-        }
-      case 'remind':
-        return {
-          id: 'status-remind',
-          text: activeQuest
-            ? `⏰ Reminder: Time to work on "${activeQuest.text}"!`
-            : '⏰ Time to check your daily quests!',
-          type: 'task',
-          actionLabel: 'OPEN QUESTS'
-        }
-      case 'angry':
-        return {
-          id: 'status-angry',
-          text: activeQuest
-            ? `🔥 Hey! You are not doing "${activeQuest.text}" for a long time!`
-            : '🔥 Hey! You are neglecting your quests!',
-          type: 'task',
-          actionLabel: 'DO QUEST NOW'
-        }
-      case 'sad':
-        return {
-          id: 'status-sad',
-          text: activeQuest
-            ? `😢 Still not doing "${activeQuest.text}"... Please don't forget!`
-            : '😢 I am sad because your quests are being ignored...',
-          type: 'task',
-          actionLabel: 'OPEN QUESTS'
-        }
-      case 'idle':
-      default: {
-        const greeting = settings.userName ? `Hey ${settings.userName}! ` : ''
-        return {
-          id: 'status-idle',
-          text: activeQuest
-            ? `🐾 Active task: "${activeQuest.text}" (⏰ ${activeQuest.reminderMinutes || settings.taskReminderMinutes || 35}m)`
-            : tasks.length === 0
-              ? `🐾 ${greeting}No tasks yet — click me to add one!`
-              : `✨ ${greeting}All tasks complete! Click me to add another.`,
-          type: 'task',
-          actionLabel: 'OPEN TASKS'
-        }
-      }
+    return {
+      id: 'status-custom',
+      text: customStatusText,
+      type: 'task',
+      showYesNo: wellnessPrompt !== null
     }
   }
 
@@ -1206,41 +1065,33 @@ export default function App(): JSX.Element {
           }}
           onDoubleClick={openQuestModal}
         >
-          {/* Hover-only quick hide button */}
-          <button
-            type="button"
-            className="companion-hide-btn"
-            title="Hide Ash"
-            aria-label="Hide Ash"
-            onMouseDown={(e) => {
-              e.stopPropagation()
-              e.preventDefault()
-            }}
-            onPointerUp={(e) => {
-              e.stopPropagation()
-              e.preventDefault()
-            }}
-            onClick={(e) => {
-              e.stopPropagation()
-              e.preventDefault()
-              sounds.playClick()
-              setIsAshHidden(true)
-              setIgnoreMouse(true)
-            }}
-          >
-            ×
-          </button>
+          {/* Hover-only quick hide button (only shown when speech bubble is not covering the top) */}
+          {!stickyBubbleMessage && (
+            <button
+              type="button"
+              className="companion-hide-btn"
+              title="Hide Ash"
+              aria-label="Hide Ash"
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                sounds.playClick()
+                setIsAshHidden(true)
+                setIgnoreMouse(true)
+              }}
+            >
+              ×
+            </button>
+          )}
 
-          {/* Speech Bubble with Typewriter animation & 12s auto-hide */}
+          {/* Speech Bubble with Typewriter animation & 10s auto-hide */}
           <SpeechBubble
             message={stickyBubbleMessage}
             spriteState={spriteState}
             onMouseEnter={enterInteractiveZone}
-            onClose={() => {
-              setIsBubbleVisible(false)
-              setWellnessPrompt(null)
-              pendingWellnessActionRef.current = null
-            }}
+            onClose={closeBubbleImmediately}
             onAction={openQuestModal}
             onYes={handleWellnessYes}
             onNo={handleWellnessNo}
@@ -1284,8 +1135,7 @@ export default function App(): JSX.Element {
         settings={settings}
         onUpdateSettings={(newSettings) => setSettings((prev) => ({ ...prev, ...newSettings }))}
         onTriggerState={(st, dur) => {
-          setIsModalOpen(false)
-          setTimeout(() => triggerState(st, dur ?? 12000), 120)
+          triggerState(st, dur ?? 12000)
         }}
         onStartBreathing={() => {
           lastEyeRestAtRef.current = Date.now()
@@ -1293,26 +1143,10 @@ export default function App(): JSX.Element {
           setIsModalOpen(false)
           setIsBreathingOpen(true)
         }}
-        onTestWaterReminder={() => {
-          setIsModalOpen(false)
-          setTimeout(() => triggerWaterReminder(), 150)
-        }}
-        onTestEyeRestReminder={() => {
-          setIsModalOpen(false)
-          setTimeout(() => triggerEyeRestReminder(), 150)
-        }}
         onReplayOnboarding={() => {
           setIsModalOpen(false)
           setSettings((prev) => ({ ...prev, onboardingCompleted: false }))
         }}
-        onLoadVideoDemo={handleLoadVideoDemo}
-        onClearDemoData={handleClearDemoData}
-        onFlyToSafeZone={() => {
-          setIsModalOpen(false)
-          setTimeout(() => flyToSafeCorner(), 120)
-        }}
-        onWalkAcrossFloor={handleWalkAcrossFloor}
-        onTriggerRoamNow={handleTriggerRoamNow}
       />
 
       {/* First-Run 3-Step Onboarding Flow */}

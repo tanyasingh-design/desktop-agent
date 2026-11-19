@@ -32,7 +32,6 @@ export const SpeechBubble: React.FC<SpeechBubbleProps> = ({
       return
     }
 
-    // Use Array.from so multi-byte emojis (🐾, ⏰, 🔥, 😢) type cleanly as whole characters
     const chars = Array.from(message.text)
     let index = 0
     setTypedText('')
@@ -52,12 +51,6 @@ export const SpeechBubble: React.FC<SpeechBubbleProps> = ({
 
   if (!message) return null
 
-  const handleTrigger = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    e.preventDefault()
-    if (onAction) onAction(message.actionData)
-  }
-
   const stateClass =
     spriteState === 'sleep' ? 'bubble-sleep' : spriteState === 'fly' ? 'bubble-fly' : ''
 
@@ -66,26 +59,27 @@ export const SpeechBubble: React.FC<SpeechBubbleProps> = ({
       className={`speech-bubble-bridge ${stateClass}`.trim()}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      onMouseDown={(e) => {
-        if (e.button !== 0) return
-        handleTrigger(e)
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerUp={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onMouseUp={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation()
+        if (message.showYesNo) return
+        if (onAction) onAction(message.actionData)
       }}
-      onClick={handleTrigger}
     >
-      <div className="speech-bubble" title="Click to open Quests & Settings">
+      <div className="speech-bubble" title={message.showYesNo ? undefined : 'Click to open Ash panel'}>
         {onClose && (
           <button
             type="button"
             className="speech-bubble-dismiss-btn"
             title="Dismiss bubble"
-            onMouseDown={(e) => {
-              e.stopPropagation()
-              e.preventDefault()
-              onClose()
-            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerUp={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
-              e.preventDefault()
               onClose()
             }}
           >
@@ -98,19 +92,23 @@ export const SpeechBubble: React.FC<SpeechBubbleProps> = ({
             {isTyping && <span className="typewriter-cursor">▋</span>}
           </span>
           {message.showYesNo && (
-            <div style={{ display: 'flex', gap: '8px', marginTop: '2px' }}>
+            <div
+              style={{ display: 'flex', gap: '8px', marginTop: '2px' }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
               <button
                 type="button"
                 className="paper-btn-dark"
                 style={{ flex: 1, padding: '7px 10px', fontSize: '9px' }}
-                onMouseDown={(e) => {
-                  e.stopPropagation()
-                  e.preventDefault()
-                  if (onYes) onYes()
-                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation()
-                  e.preventDefault()
+                  if (onYes) onYes()
                 }}
               >
                 YES
@@ -119,14 +117,12 @@ export const SpeechBubble: React.FC<SpeechBubbleProps> = ({
                 type="button"
                 className="paper-btn-ghost"
                 style={{ flex: 1, padding: '7px 10px', fontSize: '11px' }}
-                onMouseDown={(e) => {
-                  e.stopPropagation()
-                  e.preventDefault()
-                  if (onNo) onNo()
-                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation()
-                  e.preventDefault()
+                  if (onNo) onNo()
                 }}
               >
                 No

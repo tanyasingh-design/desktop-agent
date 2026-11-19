@@ -86,12 +86,14 @@ app.whenReady().then(() => {
   createWindow()
 
   // Global typing detection: Option A (uiohook-napi) with Option B (powerMonitor) fallback
+  const startedAt = Date.now()
   let lastTypingSent = 0
   let fallbackInterval: NodeJS.Timeout | null = null
   let uiohookStarted = false
 
   const emitTypingPing = () => {
     const now = Date.now()
+    if (now - startedAt < 5000) return // 5s startup grace period
     if (now - lastTypingSent < 500) return
     lastTypingSent = now
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -102,9 +104,25 @@ app.whenReady().then(() => {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { uIOhook } = require('uiohook-napi') as {
-      uIOhook: { on: (event: string, cb: () => void) => void; start: () => void; stop: () => void }
+      uIOhook: {
+        on: (event: string, cb: (e?: { keycode?: number }) => void) => void
+        start: () => void
+        stop: () => void
+      }
     }
-    uIOhook.on('keydown', emitTypingPing)
+    // Require 3 keydowns within 2.5s so a single stray key or app-launch Enter never triggers flying
+    const recentKeyTimes: number[] = []
+    uIOhook.on('keydown', () => {
+      const now = Date.now()
+      if (now - startedAt < 5000) return
+      recentKeyTimes.push(now)
+      while (recentKeyTimes.length > 0 && now - recentKeyTimes[0] > 2500) {
+        recentKeyTimes.shift()
+      }
+      if (recentKeyTimes.length >= 3) {
+        emitTypingPing()
+      }
+    })
     uIOhook.start()
     uiohookStarted = true
 
@@ -116,15 +134,34 @@ app.whenReady().then(() => {
       }
     })
   } catch {
-    // Fallback Option B: powerMonitor idle time + cursor movement check
+    // Fallback Option B: powerMonitor idle time + strict cursor-stillness guard
+    // Prevents false triggers right after mouse stops or app launch (idle === 0 lasts up to 999ms after mouse move)
     let lastCursor = screen.getCursorScreenPoint()
+    let lastCursorMoveAt = Date.now()
+    let consecutiveStillActive = 0
+
     fallbackInterval = setInterval(() => {
+      const now = Date.now()
+      if (now - startedAt < 5000) return
+
       const idle = powerMonitor.getSystemIdleTime()
       const cur = screen.getCursorScreenPoint()
       const moved = cur.x !== lastCursor.x || cur.y !== lastCursor.y
       lastCursor = cur
-      if (idle < 1 && !moved) {
-        emitTypingPing()
+
+      if (moved) {
+        lastCursorMoveAt = now
+        consecutiveStillActive = 0
+        return
+      }
+
+      if (idle < 1 && now - lastCursorMoveAt >= 1800) {
+        consecutiveStillActive += 1
+        if (consecutiveStillActive >= 3) {
+          emitTypingPing()
+        }
+      } else {
+        consecutiveStillActive = 0
       }
     }, 400)
 
